@@ -1,6 +1,5 @@
 General:
 -------
-<<<<<<< HEAD
 - cycle counter for all archs
 - cpu_interrupt() win32/SMP fix
 - merge PIC spurious interrupt patch
@@ -36,12 +35,3 @@ lower priority:
 --------------
 - int15 ah=86: use better timing
 - use -msoft-float on ARM
-=======
-- add nand support
-- fix usb
-- fix i2c/spi
-- boot kernel
-- Add iPhone3gs/iPad/iPhone4 support
-- ????
-- jailbreaks++
->>>>>>> 3a2bc0331d4a9f25396fc9bbd3ef303e3ab9da7e
