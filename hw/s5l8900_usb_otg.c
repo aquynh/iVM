@@ -37,8 +37,8 @@
 #define USB_INT_INCOMPLISOOUT \
                             (1 << 21) /* Incomplete Isochronous OUT Transfer */
 #define USB_INT_FETSUSP     (1 << 22) /* Data Fetch Suspended */
-//#define USB_INT_PRTINT    (1 << 24) /* Host Port Interrupt */
-//#define USB_INT_HCHINT    (1 << 25) /* Host Channels Interrupt */
+#define USB_INT_PRTINT    (1 << 24) /* Host Port Interrupt */
+#define USB_INT_HCHINT    (1 << 25) /* Host Channels Interrupt */
 #define USB_INT_PTXFEMP     (1 << 26) /* Periodic TxFIFO Empty */
 #define USB_INT_CONIDSTSCHNG \
                             (1 << 28) /* Connector ID Status Change */
@@ -70,7 +70,6 @@
 #define OTG_EP_DISABLE      (1 << 30)
 
 #define OTG_EP_COUNT        16
-
 
 typedef enum {
     OTG_STATE_START = 0,
@@ -156,9 +155,9 @@ static void s5l8900_usb_otg_update_irq(S5L8900UsbOtgState *s)
 {
     if (s->gint_sts & s->gint_msk) {
     	fprintf(stderr,"%s: qemu_irq_raise()\n", __func__);
-        //qemu_irq_raise(s->irq);
+        qemu_irq_raise(s->irq);
     } else {
-		 fprintf(stderr,"%s: qemu_irq_lower()\n", __func__);
+		fprintf(stderr,"%s: qemu_irq_lower()\n", __func__);
         qemu_irq_lower(s->irq);
     }
 }

@@ -20,6 +20,7 @@
 #include "block.h"
 #include "boards.h"
 #include "s5l8900.h"
+#include "usb_synopsys.h"
 #include "net.h"
 #include "i2c.h"
 
@@ -233,6 +234,28 @@ static inline qemu_irq s5l8900_get_irq(struct s5l8900_state_s *s, int n)
     return s->irq[n / S5L8900_VIC_SIZE][n % S5L8900_VIC_SIZE];
 }
 
+static uint32_t s5l8900_usb_phy_read(void *opaque, target_phys_addr_t offset)
+{
+	return 0;
+}
+
+static void s5l8900_usb_phy_write(void *opaque, target_phys_addr_t offset, uint32_t val)
+{
+	fprintf(stderr, "%s: offset 0x%08x val 0x%08x\n", __func__, offset, val);
+}
+
+static CPUReadMemoryFunc * const s5l8900_usb_phy_readfn[] = {
+    s5l8900_usb_phy_read,
+    s5l8900_usb_phy_read,
+    s5l8900_usb_phy_read,
+};
+
+static CPUWriteMemoryFunc * const s5l8900_usb_phy_writefn[] = {
+    s5l8900_usb_phy_write,
+    s5l8900_usb_phy_write,
+    s5l8900_usb_phy_write,
+};
+
 s5l8900_state *s5l8900_init(void)
 {
 
@@ -318,9 +341,19 @@ s5l8900_state *s5l8900_init(void)
                          s5l8900_get_irq(s, S5L8900_SPI2_IRQ));
 
     /* USB-OTG */
-    s5l8900_usb_otg_init(&nd_table[0],
-                         S5L8900_USB_OTG_BASE,
-                         s5l8900_get_irq(s, S5L8900_IRQ_OTG));
+    //s5l8900_usb_otg_init(&nd_table[0],
+    //                     S5L8900_USB_OTG_BASE,
+    //                     s5l8900_get_irq(s, S5L8900_IRQ_OTG));
+	
+	register_synopsys_usb(S5L8900_USB_OTG_BASE,
+			s5l8900_get_irq(s, S5L8900_IRQ_OTG));
+	
+	// USB PHY
+    int iomemtype = cpu_register_io_memory(s5l8900_usb_phy_readfn,
+                                           s5l8900_usb_phy_writefn,
+										   s, DEVICE_LITTLE_ENDIAN);
+    cpu_register_physical_memory(S5L8900_USB_PHY_BASE, 0x40, iomemtype);
+
 
 	return s;
 }

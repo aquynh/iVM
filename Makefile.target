@@ -353,7 +353,7 @@ obj-arm-y += syborg_serial.o syborg_timer.o syborg_pointer.o syborg_rtc.o
 obj-arm-y += syborg_virtio.o
 obj-arm-y += vexpress.o
 obj-arm-y += s5l8900.o iphone2g.o pcf50633.o s5l8900_uart.o s5l8900_spi.o pl192.o
-obj-arm-y += s5l8900_i2c.o s5l8900_usb_otg.o
+obj-arm-y += s5l8900_i2c.o usb_synopsys.o #s5l8900_usb_otg.o
 
 
 obj-sh4-y = shix.o r2d.o sh7750.o sh7750_regnames.o tc58128.o

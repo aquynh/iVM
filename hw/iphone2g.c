@@ -204,6 +204,13 @@ static void lcd_write(void *opaque, target_phys_addr_t offset, uint32_t value)
 {
     //iphone2g_lcd_s *s = (iphone2g_lcd_s *)opaque;
 	//fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
+	
+	if(offset == 0x78) // Window 2 framebuffer. Doesn't detect active window yet!
+	{
+		// Framebuffer Address
+		fprintf(stderr, "%s: Found framebuffer at 0x%08x.\n", __func__, value);
+		frame_base = value;
+	}
 }
 
 static CPUReadMemoryFunc *lcd_readfn[] = {
@@ -238,7 +245,7 @@ static uint32_t aes_read(void *opaque, target_phys_addr_t offset)
 {
 	struct iphone2g_aes_s *aesop = (struct iphone2g_aes_s *)opaque;
 
-	fprintf(stderr, "%s: offset 0x%08x\n", __FUNCTION__, offset);
+	//fprintf(stderr, "%s: offset 0x%08x\n", __FUNCTION__, offset);
 
 	switch(offset) {
 		case IPHONE2G_AES_STATUS:
@@ -281,7 +288,7 @@ static void aes_write(void *opaque, target_phys_addr_t offset,
 	 uint8_t *buf;
 	 uint32_t ctr;
 
-	 fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
+	 //fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
 
 	switch(offset) {
 			case IPHONE2G_AES_GO:
@@ -388,10 +395,8 @@ static void iphone2g_init(ram_addr_t ram_size,
 	{
 		cpu_register_physical_memory(vrom_base, (ram_addr_t)vrom_size,(phys_flash = qemu_ram_alloc(NULL, "iphone2g.vrom", vrom_size)));
 		load_image_targphys(option_rom[1].name, vrom_base, vrom_size);
-		frame_base = 0x0fe00000;
 	} else {
 		printf("No vrom assuming OIB\n");
-		frame_base = 0x0fd00000;
 	}
 
 	if(!get_image_size(option_rom[0].name))
