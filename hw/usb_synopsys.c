@@ -25,8 +25,9 @@
 #include "irq.h"
 #include "hw.h"
 #include "usb_synopsys.h"
+#include "tcp_usb.h"
 
-#define DEVICE_NAME		"usb.synopsys"
+#define DEVICE_NAME		"usb_synopsys"
 
 // Maximums supported by OIB
 #define USB_NUM_ENDPOINTS	8
@@ -233,6 +234,10 @@ typedef struct _synopsys_usb_state
 	SysBusDevice busdev;
 	qemu_irq irq;
 
+	char *server_host;
+	uint32_t server_port;
+	tcp_usb_state_t tcp_state;
+
 	uint32_t ghwcfg1;
 	uint32_t ghwcfg2;
 	uint32_t ghwcfg3;
@@ -320,7 +325,23 @@ static void synopsys_usb_update_ep(synopsys_usb_state *_state, synopsys_usb_ep_s
 	}
 }
 
-static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, int _ep)
+static void synopsys_usb_in_ep_done(tcp_usb_state_t *_tcp_state, uint8_t _ep, size_t _amt, void *_arg)
+{
+	synopsys_usb_state *state = _arg;
+	synopsys_usb_ep_state *eps = &state->in_eps[_ep];
+
+	size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
+	eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
+					| ((sz-_amt) & DEPTSIZ_XFERSIZ_MASK);
+	eps->control &=~ USB_EPCON_ENABLE;
+	eps->interrupt_status |= USB_EPINT_XferCompl;
+
+	fprintf(stderr, "usb_synopsys: IN transfer complete!\n");
+
+	synopsys_usb_update_irq(state);
+}
+
+static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, uint8_t _ep)
 {
 	synopsys_usb_ep_state *eps = &_state->in_eps[_ep];
 	synopsys_usb_update_ep(_state, eps);
@@ -349,21 +370,38 @@ static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, int _ep)
 			eps->dma_address += amtDone;
 		}
 
-		// We should PROBABLY do something with this
-		// data! -- Ricky26
-
-		eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
-						| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
-		eps->control &=~ USB_EPCON_ENABLE;
-		eps->interrupt_status |= USB_EPINT_XferCompl;
-
-		fprintf(stderr, "usb_synopsys: IN transfer complete!\n");
-
-		synopsys_usb_update_irq(_state);
+		if(!tcp_usb_okay(&_state->tcp_state))
+			tcp_usb_send(&_state->tcp_state, _ep, (char*)&_state->fifos[txfs], amtDone,
+					synopsys_usb_in_ep_done, _state);
+		else
+			synopsys_usb_in_ep_done(&_state->tcp_state, _ep, amtDone, _state);
 	}
 }
 
-static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, int _ep)
+static void synopsys_usb_out_ep_done(tcp_usb_state_t *_tcp_state, uint8_t _ep, size_t _amt, void *_arg)
+{
+	synopsys_usb_state *state = _arg;
+	synopsys_usb_ep_state *eps = &state->out_eps[_ep];
+
+	size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
+
+	if(eps->dma_address)
+	{
+		cpu_physical_memory_write(eps->dma_address, state->fifos, _amt);
+		eps->dma_address += _amt;
+	}
+
+	eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
+					| ((sz-_amt) & DEPTSIZ_XFERSIZ_MASK);
+	eps->control &=~ USB_EPCON_ENABLE;
+	eps->interrupt_status |= USB_EPINT_XferCompl;
+
+	fprintf(stderr, "usb_synopsys: OUT transfer complete!\n");
+
+	synopsys_usb_update_irq(state);
+}
+
+static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, uint8_t _ep)
 {
 	synopsys_usb_ep_state *eps = &_state->out_eps[_ep];
 	synopsys_usb_update_ep(_state, eps);
@@ -372,20 +410,14 @@ static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, int _ep)
 	{
 		// Do OUT transfer!
 		
-		if(1)
+		if(tcp_usb_okay(&_state->tcp_state))
 		{
 			fprintf(stderr, "usb_synopsys: OUT transfer queued!\n");
 			return;
 		}
-
-		char *data = NULL;
-		size_t amtAvail = 0; // TODO: Fill these in!
-
+			
 		size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
-		size_t amtDone = amtAvail;
-		if(amtDone > sz)
-			amtDone = sz;
-
+		size_t amtDone = sz;
 		size_t rxfz = _state->grxfsiz;
 		if(amtDone > rxfz)
 			amtDone = rxfz;
@@ -393,29 +425,12 @@ static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, int _ep)
 		if(rxfz > sizeof(_state->fifos))
 			hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
 
-		memcpy(_state->fifos, data, amtDone);
-
-		if(eps->dma_address)
-		{
-			cpu_physical_memory_write(eps->dma_address, _state->fifos, amtDone);
-			eps->dma_address += amtDone;
-		}
-
-		eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
-						| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
-		eps->control &=~ USB_EPCON_ENABLE;
-		eps->interrupt_status |= USB_EPINT_XferCompl;
-
-		fprintf(stderr, "usb_synopsys: OUT transfer complete!\n");
-
-		synopsys_usb_update_irq(_state);
-
-		// We have no data to give qemu! :(! -- Ricky26
-		
+		tcp_usb_recv(&_state->tcp_state, _ep, (char*)_state->fifos, amtDone,
+				synopsys_usb_out_ep_done, _state);
 	}
 }
 
-static uint32_t synopsys_usb_in_ep_read(synopsys_usb_state *_state, int _ep, target_phys_addr_t _addr)
+static uint32_t synopsys_usb_in_ep_read(synopsys_usb_state *_state, uint8_t _ep, target_phys_addr_t _addr)
 {
 	if(_ep >= USB_NUM_ENDPOINTS)
 	{
@@ -653,6 +668,17 @@ static int synopsys_usb_init(SysBusDevice *dev)
 {
 	synopsys_usb_state *state =
 		FROM_SYSBUS(synopsys_usb_state, dev);
+
+	tcp_usb_init(&state->tcp_state);
+	if(state->server_host)
+	{
+		printf("Connecting to USB server at %s:%d...\n",
+				state->server_host, state->server_port);
+
+		if(tcp_usb_connect(&state->tcp_state, state->server_host, state->server_port))
+			hw_error("Failed to connect to USB server.\n");
+	}
+
     int iomemtype = cpu_register_io_memory(synopsys_usb_readfn,
                                synopsys_usb_writefn, state, DEVICE_LITTLE_ENDIAN);
 
@@ -669,6 +695,8 @@ static SysBusDeviceInfo synopsys_usb_info = {
     .qdev.size  = sizeof(synopsys_usb_state),
     .qdev.reset = synopsys_usb_initial_reset,
     .qdev.props = (Property[]) {
+		DEFINE_PROP_STRING("host", synopsys_usb_state, server_host),
+		DEFINE_PROP_UINT32("port", synopsys_usb_state, server_port, 7642),
         DEFINE_PROP_END_OF_LIST(),
     }
 };
