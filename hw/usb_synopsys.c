@@ -256,6 +256,7 @@ typedef struct _synopsys_usb_state
 
 	uint32_t dptxfsiz[USB_NUM_FIFOS];
 
+	uint32_t dctl;
 	uint32_t dcfg;
 	uint32_t dsts;
 	uint32_t daintmsk;
@@ -329,128 +330,139 @@ static void synopsys_usb_update_ep(synopsys_usb_state *_state, synopsys_usb_ep_s
 	}
 }
 
-static void synopsys_usb_in_ep_done(tcp_usb_state_t *_tcp_state, uint8_t _ep, size_t _amt, void *_arg)
-{
-	synopsys_usb_state *state = _arg;
-	synopsys_usb_ep_state *eps = &state->in_eps[_ep];
-
-	size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
-	eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
-					| ((sz-_amt) & DEPTSIZ_XFERSIZ_MASK);
-	eps->control &=~ USB_EPCON_ENABLE;
-	eps->interrupt_status |= USB_EPINT_XferCompl;
-
-	fprintf(stderr, "usb_synopsys: IN transfer complete!\n");
-
-	synopsys_usb_update_irq(state);
-}
-
 static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, uint8_t _ep)
 {
 	synopsys_usb_ep_state *eps = &_state->in_eps[_ep];
 	synopsys_usb_update_ep(_state, eps);
-
-	if(eps->control & USB_EPCON_ENABLE)
-	{
-		// Do IN transfer!
-		
-		size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
-		size_t amtDone = sz;
-
-		if(eps->fifo >= USB_NUM_FIFOS)
-			hw_error("usb_synopsys: USB transfer on non-existant FIFO %d!\n", eps->fifo);
-
-		size_t txfz = synopsys_usb_tx_fifo_size(_state, eps->fifo);
-		if(amtDone > txfz)
-			amtDone = txfz;
-
-		size_t txfs = synopsys_usb_tx_fifo_start(_state, eps->fifo);
-		if(txfs + txfz > sizeof(_state->fifos))
-			hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
-
-		if(eps->dma_address)
-		{
-			cpu_physical_memory_read(eps->dma_address, &_state->fifos[txfs], amtDone);
-			eps->dma_address += amtDone;
-		}
-
-		printf("USB: Starting IN transfer on EP %d (%d)...\n", _ep, amtDone);
-
-		if(!tcp_usb_okay(&_state->tcp_state))
-			tcp_usb_send(&_state->tcp_state, _ep, (char*)&_state->fifos[txfs], amtDone,
-					synopsys_usb_in_ep_done, _state);
-		else
-			synopsys_usb_in_ep_done(&_state->tcp_state, _ep, amtDone, _state);
-	}
-}
-
-static void synopsys_usb_out_ep_done(tcp_usb_state_t *_tcp_state, uint8_t _ep, size_t _amt, void *_arg)
-{
-	synopsys_usb_state *state = _arg;
-	synopsys_usb_ep_state *eps = &state->out_eps[_ep];
-
-	size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
-
-	if(_ep == 0 && _amt == 8)
-	{
-		printf("USB: Setup %02x %02x %02x %02x %02x %02x %02x %02x\n",
-				state->fifos[0],
-				state->fifos[1],
-				state->fifos[2],
-				state->fifos[3],
-				state->fifos[4],
-				state->fifos[5],
-				state->fifos[6],
-				state->fifos[7]);
-
-		eps->interrupt_status |= USB_EPINT_SetUp;
-	}
-
-	if(eps->dma_address)
-	{
-		printf("USB: DMA copying to 0x%08x.\n", eps->dma_address);
-		cpu_physical_memory_write(eps->dma_address, state->fifos, _amt);
-		eps->dma_address += _amt;
-	}
-
-	eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
-					| ((sz-_amt) & DEPTSIZ_XFERSIZ_MASK);
-	eps->control &=~ USB_EPCON_ENABLE;
-	eps->interrupt_status |= USB_EPINT_XferCompl;
-
-	fprintf(stderr, "usb_synopsys: OUT transfer complete!\n");
-
-	synopsys_usb_update_irq(state);
 }
 
 static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, uint8_t _ep)
 {
 	synopsys_usb_ep_state *eps = &_state->out_eps[_ep];
 	synopsys_usb_update_ep(_state, eps);
+}
 
-	if(eps->control & USB_EPCON_ENABLE)
+static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_usb_header_t *_hdr, char *_buffer)
+{
+	synopsys_usb_state *state = _arg;
+
+	if(_hdr->flags & tcp_usb_reset)
 	{
-		// Do OUT transfer!
-		
-		if(tcp_usb_okay(&_state->tcp_state))
+		state->gintsts |= GINTMSK_RESET;
+		synopsys_usb_update_irq(state);
+		return 0;
+	}
+
+	uint8_t ep = _hdr->ep & 0x7f;
+	if(_hdr->ep & USB_DIR_IN)
+	{
+		synopsys_usb_ep_state *eps = &state->in_eps[ep];
+
+		if(eps->control & USB_EPCON_STALL)
+			return USB_RET_STALL;
+		else if(eps->control & USB_EPCON_ENABLE)
 		{
-			fprintf(stderr, "usb_synopsys: OUT transfer queued!\n");
-			return;
+			// Do IN transfer!
+			eps->control &=~ USB_EPCON_ENABLE;
+
+			size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
+			size_t amtDone = sz;
+			if(amtDone > _hdr->length)
+				amtDone = _hdr->length;
+
+			if(eps->fifo >= USB_NUM_FIFOS)
+				hw_error("usb_synopsys: USB transfer on non-existant FIFO %d!\n", eps->fifo);
+
+			size_t txfz = synopsys_usb_tx_fifo_size(state, eps->fifo);
+			if(amtDone > txfz)
+				amtDone = txfz;
+
+			size_t txfs = synopsys_usb_tx_fifo_start(state, eps->fifo);
+			if(txfs + txfz > sizeof(state->fifos))
+				hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
+
+			if(eps->dma_address)
+			{
+				cpu_physical_memory_read(eps->dma_address, &state->fifos[txfs], amtDone);
+				eps->dma_address += amtDone;
+			}
+
+			printf("USB: Starting IN transfer on EP %d (%d)...\n", ep, amtDone);
+
+			memcpy(_buffer, (char*)&state->fifos[txfs], amtDone);
+
+			printf("USB: IN tranfer complete!\n");
+
+			eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
+							| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
+			eps->interrupt_status |= USB_EPINT_XferCompl;
+
+			synopsys_usb_update_irq(state);
+
+			return amtDone;
 		}
-			
-		size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
-		size_t amtDone = sz;
-		size_t rxfz = _state->grxfsiz;
-		if(amtDone > rxfz)
-			amtDone = rxfz;
+		else
+			return USB_RET_NAK;
+	}
+	else // OUT
+	{	
+		synopsys_usb_ep_state *eps = &state->out_eps[ep];
+		
+		if(eps->control & USB_EPCON_ENABLE)
+		{
+			// Do OUT transfer!
+			eps->control &=~ USB_EPCON_ENABLE;
 
-		if(rxfz > sizeof(_state->fifos))
-			hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
+			size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
+			size_t amtDone = sz;
+			if(amtDone > _hdr->length)
+				amtDone = _hdr->length;
 
-		printf("USB: Starting OUT transfer on EP %d (%d)...\n", _ep, amtDone);
+			size_t rxfz = state->grxfsiz;
+			if(amtDone > rxfz)
+				amtDone = rxfz;
 
-		tcp_usb_recv(&_state->tcp_state, _ep, (char*)_state->fifos, amtDone,
-				synopsys_usb_out_ep_done, _state);
+			if(rxfz > sizeof(state->fifos))
+				hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
+
+			printf("USB: Starting OUT transfer on EP %d (%d)...\n", ep, amtDone);
+
+			memcpy((char*)state->fifos, _buffer, amtDone);
+
+			printf("USB: OUT transfer complete!\n");
+
+			if(_hdr->flags & tcp_usb_setup)
+			{
+				printf("USB: Setup %02x %02x %02x %02x %02x %02x %02x %02x\n",
+						state->fifos[0],
+						state->fifos[1],
+						state->fifos[2],
+						state->fifos[3],
+						state->fifos[4],
+						state->fifos[5],
+						state->fifos[6],
+						state->fifos[7]);
+
+				eps->interrupt_status |= USB_EPINT_SetUp;
+			}
+
+			if(eps->dma_address)
+			{
+				printf("USB: DMA copying to 0x%08x.\n", eps->dma_address);
+				cpu_physical_memory_write(eps->dma_address, state->fifos, amtDone);
+				eps->dma_address += amtDone;
+			}
+
+			eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
+							| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
+			eps->interrupt_status |= USB_EPINT_XferCompl;
+
+			synopsys_usb_update_irq(state);
+
+			return amtDone;
+		}
+		else
+			return USB_RET_NAK;
 	}
 }
 
@@ -552,6 +564,9 @@ static uint32_t synopsys_usb_read(void *_arg, target_phys_addr_t _addr)
 	
 	case DAINTSTS:
 		return state->daintsts;
+
+	case DCTL:
+		return state->dctl;
 
 	case DCFG:
 		return state->dcfg;
@@ -680,7 +695,7 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 			if(state->server_host)
 			{
 				tcp_usb_cleanup(&state->tcp_state);
-				tcp_usb_init(&state->tcp_state);
+				tcp_usb_init(&state->tcp_state, synopsys_usb_tcp_callback, state);
 
 				printf("Connecting to USB server at %s:%d...\n",
 						state->server_host, state->server_port);
@@ -716,6 +731,19 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 	
 	case DAINTSTS:
 		state->daintsts &=~ _val;
+		synopsys_usb_update_irq(state);
+		return;
+
+	case DCTL:
+		if((_val & DCTL_SGNPINNAK) != (state->dctl & DCTL_SGNPINNAK)
+				&& (_val & DCTL_SGNPINNAK))
+			state->gintsts |= GINTMSK_GINNAKEFF;
+
+		if((_val & DCTL_SGOUTNAK) != (state->dctl & DCTL_SGOUTNAK)
+				&& (_val & DCTL_SGOUTNAK))
+			state->gintsts |= GINTMSK_GOUTNAKEFF;
+
+		state->dctl = _val;
 		synopsys_usb_update_irq(state);
 		return;
 
@@ -777,6 +805,10 @@ static void synopsys_usb_initial_reset(DeviceState *dev)
 	state->ghwcfg3 = 0x082000e8;
 	state->ghwcfg4 = 0x01f08024;
 
+	state->dctl = 0;
+	state->dcfg = 0;
+	state->dsts = 0;
+
 	state->gintmsk = 0;
 	state->gintsts = 0;
 	state->daintmsk = 0;
@@ -816,7 +848,7 @@ static int synopsys_usb_init(SysBusDevice *dev)
 	synopsys_usb_state *state =
 		FROM_SYSBUS(synopsys_usb_state, dev);
 
-	tcp_usb_init(&state->tcp_state);
+	tcp_usb_init(&state->tcp_state, NULL, NULL);
 
     int iomemtype = cpu_register_io_memory(synopsys_usb_readfn,
                                synopsys_usb_writefn, state, DEVICE_LITTLE_ENDIAN);

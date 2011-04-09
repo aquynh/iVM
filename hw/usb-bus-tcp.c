@@ -57,6 +57,17 @@ static int passthrough_init(USBDevice *dev)
 
 static void passthrough_reset(USBDevice *dev)
 {
+	tcp_passthrough_state_t *state = (tcp_passthrough_state_t*)dev;
+
+	if(tcp_usb_closed(state->tcp))
+		return;
+
+	tcp_usb_header_t header;
+	header.addr = 0;
+	header.ep = 0;
+	header.flags = tcp_usb_reset;
+	header.length = 0;
+	tcp_usb_request(state->tcp, &header, NULL);
 }
 
 static int passthrough_packet(USBDevice *s, USBPacket *p)
@@ -96,35 +107,41 @@ static int passthrough_packet(USBDevice *s, USBPacket *p)
 		return USB_RET_STALL;
 	}
 
-	uint8_t ep = p->devep & 0x3f;
-	size_t sz = p->len;
-
-	if(tcp_usb_okay(state->tcp))
+	if(tcp_usb_closed(state->tcp))
 		return USB_RET_STALL;
 
+	tcp_usb_header_t header;
 	switch(p->pid)
 	{
 	case USB_TOKEN_SETUP:
-		tcp_usb_send(state->tcp, ep, (char*)p->data, sz, NULL, NULL);
-		printf("Host USB setup %d.\n", sz);
-		return sz;
+		header.ep = p->devep;
+		header.flags = tcp_usb_setup;
+		header.addr = 0;
+		header.length = p->len;
+
+		//printf("Host USB: SETUP token on %02x.\n", p->devep);
+
+		return tcp_usb_request(state->tcp, &header, (char*)p->data);
 
 	case USB_TOKEN_OUT:
-		tcp_usb_send(state->tcp, ep, (char*)p->data, sz, NULL, NULL);
-		printf("Host USB sent %d.\n", sz);
-		return sz;
+		header.ep = p->devep;
+		header.flags = 0;
+		header.addr = 0;
+		header.length = p->len;
+		
+		//printf("Host USB: OUT token on %02x.\n", p->devep);
+
+		return tcp_usb_request(state->tcp, &header, (char*)p->data);
 
 	case USB_TOKEN_IN:
-		if((tcp_usb_state(state->tcp) & (1 << ep)) == 0)
-			return USB_RET_NAK;
+		header.ep = p->devep | USB_DIR_IN;
+		header.flags = 0;
+		header.addr = 0;
+		header.length = p->len;
 
-		printf("Host USB: recv on EP %d (%d)...\n", ep, sz);
-		tcp_usb_recv_sync(state->tcp, ep, (char*)p->data, &sz);
-		if(sz == 0xFFFF)
-			return USB_RET_STALL;
+		//printf("Host USB: IN token on %02x.\n", p->devep);
 
-		printf("Host USB recv'd %d.\n", sz);
-		return sz;
+		return tcp_usb_request(state->tcp, &header, (char*)p->data);
 	}
 
 	return USB_RET_STALL;
@@ -153,7 +170,7 @@ static void *tcp_bus_thread(void *_arg)
 	while(state->closed == 0)
 	{
 		tcp_usb_state_t *newState = malloc(sizeof(*newState));
-		tcp_usb_init(newState);
+		tcp_usb_init(newState, NULL, NULL);
 
 		while(tcp_usb_accept(&state->tcp_usb_state, newState) < 0)
 		{

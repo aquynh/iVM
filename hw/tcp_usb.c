@@ -28,48 +28,16 @@
 #include "net.h"
 #include "irq.h"
 #include "hw.h"
+#include "usb.h"
 #include "tcp_usb.h"
 
-enum
+void tcp_usb_init(tcp_usb_state_t *_state, tcp_usb_callback_t _cb, void *_arg)
 {
-	packet_status,
-	packet_data,
-	packet_request,
-};
-
-typedef struct _tcp_usb_header
-{
-	uint8_t type;
-	uint8_t ep;
-	uint16_t length;
-
-} __attribute__((packed)) tcp_usb_header_t;
-
-void tcp_usb_init(tcp_usb_state_t *_state)
-{
+	_state->callback = _cb;
+	_state->callback_arg = _arg;
 	_state->socket = 0;
 	_state->thread = 0;
-	pthread_mutex_init(&_state->write_mutex, NULL);
 	_state->closed = 0;
-
-	_state->status = 0;
-	_state->remote_status = 0;
-
-	memset(_state->queued_writes, 0, sizeof(_state->queued_writes));
-	memset(_state->queued_reads, 0, sizeof(_state->queued_reads));
-
-	int i;
-	for(i = 0; i < TCP_USB_NUM_EP; i++)
-	{
-		pthread_mutex_init(&_state->queued_writes[i].mutex, NULL);
-		pthread_mutex_init(&_state->queued_reads[i].mutex, NULL);
-
-		pthread_cond_init(&_state->queued_writes[i].avail, NULL);
-		pthread_cond_init(&_state->queued_reads[i].avail, NULL);
-
-		pthread_cond_init(&_state->queued_writes[i].sync, NULL);
-		pthread_cond_init(&_state->queued_reads[i].sync, NULL);
-	}
 }
 
 void tcp_usb_cleanup(tcp_usb_state_t *_state)
@@ -83,9 +51,9 @@ void tcp_usb_cleanup(tcp_usb_state_t *_state)
 		close(_state->socket);
 }
 
-int tcp_usb_okay(tcp_usb_state_t *_state)
+int tcp_usb_closed(tcp_usb_state_t *_state)
 {
-	return _state->closed;
+	return _state->closed != 0;
 }
 
 static int read_block(int _sock, void *_data, size_t _amt)
@@ -126,151 +94,52 @@ static void *tcp_usb_thread(void *_arg)
 			return NULL;
 		}
 
-		//printf("USB: Got packet (%d): %02x %02x %04x.\n",
-		//		ret, header.type, header.ep, header.length);
-
-		int i;
-		tcp_usb_message_t *msg;
-		switch(header.type)
+		char *data = NULL;
+		if(header.length > 0)
 		{
-		case packet_status:
-			read_block(state->socket, &state->remote_status,
-					sizeof(state->remote_status));
-
-			for(i = 0; i < TCP_USB_NUM_EP; i++)
+			data = malloc(header.length);
+			if(header.flags & tcp_usb_setup || (header.ep & USB_DIR_IN) == 0) // OUT
 			{
-				if(state->remote_status & (1 << i))
+				ret = read_block(state->socket, data, header.length);
+				if(ret <= 0)
 				{
-					msg = &state->queued_reads[i];
-
-					if(msg->data)
-					{
-						printf("%s: Data available!\n", __func__);
-
-						tcp_usb_header_t hdr;
-						hdr.type = packet_request;
-						hdr.ep = i;
-						hdr.length = 0;
-
-						pthread_mutex_lock(&state->write_mutex);
-						write(state->socket, &hdr, sizeof(hdr));
-						pthread_mutex_unlock(&state->write_mutex);
-					}
-					else
-					{
-						pthread_mutex_lock(&msg->mutex);
-						pthread_cond_signal(&msg->avail);
-						pthread_mutex_unlock(&msg->mutex);
-					}
+					printf("USB: Socket error %d, during data read.\n", ret);
+					state->closed = 1;
+					return NULL;
 				}
 			}
-
-			printf("USB: Status updated 0x%08x.\n", state->remote_status);
-			break;
-
-		case packet_request:
-			msg = &state->queued_writes[header.ep];
-
-			state->status &=~ (1 << header.ep);
-			pthread_mutex_lock(&msg->mutex);
-			pthread_cond_signal(&msg->avail);
-			pthread_mutex_unlock(&msg->mutex);
-
-			//printf("USB: Write on EP %d (%d).\n", header.ep, msg->size);
-			
-			if(msg->size != 0xFFFF)
-			{
-				printf("Send:");
-				for(i = 0; i < msg->size; i++)
-				{
-					if((i%8) == 0)
-						printf("\t");
-					printf("%02x ", msg->data[i] & 0xFF);
-					if((i%8) == 7)
-						printf("\n");
-				}
-
-				if(!i || (i%8) != 0)
-					printf("\n");
-			}
-
-			tcp_usb_header_t shdr;
-			shdr.type = packet_data;
-			shdr.ep = header.ep;
-			shdr.length = msg->size;
-
-			pthread_mutex_lock(&state->write_mutex);
-			write(state->socket, &shdr, sizeof(shdr));
-
-			if(shdr.length && shdr.length != 0xFFFF)
-				write(state->socket, msg->data, shdr.length);
-			pthread_mutex_unlock(&state->write_mutex);
-
-			if(msg->callback)
-				msg->callback(state, header.ep, msg->size, msg->arg);
-
-			msg->data = NULL;
-			break;
-
-		case packet_data:
-			msg = &state->queued_reads[header.ep];
-
-			state->remote_status &=~ (1 << header.ep);
-
-			//printf("USB: Read on EP %d (%d).\n", header.ep, header.length);
-
-			if(msg->size < header.length)
-				printf("USB: warning overflow.\n");
-
-			if(header.length && header.length != 0xFFFF)
-			{
-				ret = read_block(state->socket, msg->data, header.length);
-				if(ret < 0)
-					printf("USB: Second read failed with %d.\n", ret);
-			}
-
-			if(header.length != 0xFFFF)
-			{
-				printf("Recv:");
-				for(i = 0; i < header.length; i++)
-				{
-					if((i%8) == 0)
-						printf("\t");
-					printf("%02x ", msg->data[i] & 0xFF);
-					if((i%8) == 7)
-						printf("\n");
-				}
-
-				if(!i || (i%8) != 0)
-					printf("\n");
-			}
-
-			if(msg->callback)
-				msg->callback(state, header.ep, header.length, msg->arg);
-
-			msg->data = NULL;
-			break;
 		}
+
+		int16_t len = USB_RET_STALL;
+		if(state->callback)
+			len = state->callback(state, state->callback_arg, &header, data);
+
+		header.length = len;
+		ret = write(state->socket, &header, sizeof(header));
+		if(ret <= 0)
+		{
+			printf("USB: Socket error %d, during header write.\n", ret);
+			state->closed = 1;
+			return NULL;
+		}
+
+		if((header.flags & tcp_usb_setup || (header.ep & USB_DIR_IN) != 0)
+				&& len > 0) // IN
+		{
+			ret = write(state->socket, data, len);
+			if(ret <= 0)
+			{
+				printf("USB: Socket error %d, during data write.\n", ret);
+				state->closed = 1;
+				return NULL;
+			}
+		}
+
+		if(data)
+			free(data);
 	}
 
 	return NULL;
-}
-
-static void tcp_usb_send_status(tcp_usb_state_t *_state)
-{
-	tcp_usb_header_t hdr;
-	hdr.type = packet_status;
-	hdr.ep = 0;
-	hdr.length = 0;
-
-	printf("%s: Sending status 0x%08x.\n", __func__, _state->status);
-
-	pthread_mutex_lock(&_state->write_mutex);
-	write(_state->socket, &hdr, sizeof(hdr));
-	write(_state->socket, &_state->status, sizeof(_state->status));
-	pthread_mutex_unlock(&_state->write_mutex);
-
-	printf("%s: done.\n", __func__);
 }
 
 int tcp_usb_connect(tcp_usb_state_t *_state, char *_host, uint32_t _port)
@@ -290,131 +159,63 @@ int tcp_usb_connect(tcp_usb_state_t *_state, char *_host, uint32_t _port)
 	if(connect(_state->socket, &server_addr, sizeof(server_addr)))
 		return -EIO;
 
-	tcp_usb_send_status(_state);
-
 	pthread_create(&_state->thread, NULL, tcp_usb_thread, _state);
 
 	return 0;
 }
 
-uint32_t tcp_usb_state(tcp_usb_state_t *_state)
+int tcp_usb_request(tcp_usb_state_t *_state, tcp_usb_header_t *_header, const char *_data)
 {
-	return _state->remote_status;
-}
+	//printf("%s.\n", __func__);
 
-int tcp_usb_recv(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t _amt, tcp_usb_callback_t _cb, void *_arg)
-{
-	printf("%s.\n", __func__);
-
-	tcp_usb_message_t *msg = &_state->queued_reads[_ep];
-
-	msg->data = (char*)_data;
-	msg->size = _amt;
-	msg->callback = _cb;
-	msg->arg = _arg;
-
-	if((tcp_usb_state(_state) & (1 << _ep)) != 0)
+	int ret = write(_state->socket, _header, sizeof(*_header));
+	if(ret <= 0)
 	{
-		printf("%s: Data available!\n", __func__);
-
-		tcp_usb_header_t hdr;
-		hdr.type = packet_request;
-		hdr.ep = _ep;
-		hdr.length = 0;
-
-		pthread_mutex_lock(&_state->write_mutex);
-		write(_state->socket, &hdr, sizeof(hdr));
-		pthread_mutex_unlock(&_state->write_mutex);
+		printf("%s: header write failed.\n", __func__);
+		return ret;
 	}
 
-	printf("%s exit.\n", __func__);
+	if(_header->length > 0 &&
+			(_header->flags & tcp_usb_setup || (_header->ep & USB_DIR_IN) == 0)) // OUT
+	{
+		ret = write(_state->socket, (char*)_data, _header->length);
+		if(ret <= 0)
+		{
+			printf("%s: data write failed.\n", __func__);
+			return ret;
+		}
+	}
 
-	return 0;
-}
+	ret = read_block(_state->socket, _header, sizeof(*_header));
+	if(ret <= 0)
+	{
+		printf("%s: header read failed.\n", __func__);
+		return ret;
+	}
 
-int tcp_usb_send(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t _amt, tcp_usb_callback_t _cb, void *_arg)
-{
-	if(_state->status & (1 << _ep))
-		return -EBUSY;
+	if(_header->length > 0 &&
+			(_header->flags & tcp_usb_setup || (_header->ep & USB_DIR_IN) != 0)) // IN
+	{
+		ret = read(_state->socket, (char*)_data, _header->length);
+		if(ret <= 0)
+		{
+			printf("%s: data read failed.\n", __func__);
+			return ret;
+		}
+	}
 
-	tcp_usb_message_t *msg = &_state->queued_writes[_ep];
-	msg->data = (char*)_data;
-	msg->size = _amt;
-	msg->callback = _cb;
-	msg->arg = _arg;
+	//printf("%s exit.\n", __func__);
 
-	_state->status |= (1 << _ep);
-
-	tcp_usb_send_status(_state);
-	return 0;
-}
-
-static void tcp_usb_recv_complete(tcp_usb_state_t *_state, uint8_t _ep, size_t _amt, void *_arg)
-{
-	printf("%s.\n", __func__);
-
-	tcp_usb_message_t *msg = &_state->queued_reads[_ep];
-	pthread_mutex_lock(&msg->mutex);
-	pthread_cond_signal(&msg->sync);
-	*((size_t*)_arg) = _amt;
-	pthread_mutex_unlock(&msg->mutex);
-
-	printf("%s done.\n", __func__);
-}
-
-int tcp_usb_recv_sync(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t *_amt)
-{
-	printf("%s.\n", __func__);
-
-	tcp_usb_message_t *msg = &_state->queued_reads[_ep];
-	pthread_mutex_lock(&msg->mutex);
-
-	if((tcp_usb_state(_state) & (1 << _ep)) == 0)
-		pthread_cond_wait(&msg->avail, &msg->mutex);
-
-	int ret = tcp_usb_recv(_state, _ep, _data, *_amt, tcp_usb_recv_complete, _amt);
-	pthread_cond_wait(&msg->sync, &msg->mutex);
-	pthread_mutex_unlock(&msg->mutex);
-
-	printf("%s done.\n", __func__);
-
-	return ret;
-}
-
-static void tcp_usb_send_complete(tcp_usb_state_t *_state, uint8_t _ep, size_t _amt, void *_arg)
-{
-	tcp_usb_message_t *msg = &_state->queued_writes[_ep];
-	pthread_mutex_lock(&msg->mutex);
-	pthread_cond_wait(&msg->sync, &msg->mutex);
-	*((size_t*)_arg) = _amt;
-	pthread_mutex_unlock(&msg->mutex);
-}
-
-int tcp_usb_send_sync(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t *_amt)
-{
-	tcp_usb_message_t *msg = &_state->queued_writes[_ep];
-	pthread_mutex_lock(&msg->mutex);
-
-	if(_state->status & (1 << _ep))
-		pthread_cond_wait(&msg->avail, &msg->mutex);
-
-	int ret = tcp_usb_send(_state, _ep, _data, *_amt, tcp_usb_send_complete, _amt);
-	pthread_cond_wait(&msg->sync, &msg->mutex);
-	pthread_mutex_unlock(&msg->mutex);
-	return ret;
+	return _header->length;
 }
 
 void tcp_usb_host_init(tcp_usb_host_state_t *_state)
 {
 	_state->socket = 0;
-	_state->thread = 0;
 }
 
 void tcp_usb_host_cleanup(tcp_usb_host_state_t *_state)
 {
-	if(_state->thread)
-		pthread_cancel(_state->thread);
-
 	if(_state->socket)
 		close(_state->socket);
 }
@@ -465,8 +266,5 @@ int tcp_usb_accept(tcp_usb_host_state_t *_host, tcp_usb_state_t *_client)
 	}
 
 	printf("USB: USB device accepted!\n");
-
-	tcp_usb_send_status(_client);
-	pthread_create(&_client->thread, NULL, tcp_usb_thread, _client);
 	return 0;
 }
