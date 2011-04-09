@@ -70,6 +70,10 @@
 #define USB_OUTREGS	0xB00
 #define USB_EPREGS_SIZE 0x200
 
+#define USB_FIFO_START	0x1000
+#define USB_FIFO_SIZE	(0x100*(USB_NUM_FIFOS+1))
+#define USB_FIFO_END	(USB_FIFO_START+USB_FIFO_SIZE)
+
 #define PCGCCTL     0xE00
 
 #define PCGCCTL_ONOFF_MASK  3   // bits 0, 1
@@ -283,7 +287,7 @@ static inline size_t synopsys_usb_tx_fifo_size(synopsys_usb_state *_state, uint3
 static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 {
 	_state->daintsts = 0;
-	_state->gintsts &= ~(GINTMSK_OEP | GINTMSK_INEP);
+	_state->gintsts &=~ (GINTMSK_OEP | GINTMSK_INEP);
 
 	int i;
 	for(i = 0; i < USB_NUM_ENDPOINTS; i++)
@@ -299,7 +303,7 @@ static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 		{
 			_state->daintsts |= 1 << (i+DAINT_IN_SHIFT);
 			if(_state->daintmsk & (1 << (i+DAINT_IN_SHIFT)))
-				_state->gintsts |= GINTMSK_OEP;
+				_state->gintsts |= GINTMSK_INEP;
 		}
 	}
 
@@ -370,6 +374,20 @@ static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, uint8_t _ep)
 			eps->dma_address += amtDone;
 		}
 
+		char *ptr = (char*)&_state->fifos[txfs];
+		printf("Wrote:");
+		int i;
+		for(i = 0; i < amtDone; i++)
+		{
+			if((i%8) == 0)
+				printf("\t");
+			printf("%02x ", ptr[i] & 0xFF);
+			if((i%8) == 7)
+				printf("\n");
+		}
+		
+		printf("USB: Starting IN transfer on EP %d (%d)...\n", _ep, amtDone);
+
 		if(!tcp_usb_okay(&_state->tcp_state))
 			tcp_usb_send(&_state->tcp_state, _ep, (char*)&_state->fifos[txfs], amtDone,
 					synopsys_usb_in_ep_done, _state);
@@ -385,8 +403,24 @@ static void synopsys_usb_out_ep_done(tcp_usb_state_t *_tcp_state, uint8_t _ep, s
 
 	size_t sz = eps->tx_size & DEPTSIZ_XFERSIZ_MASK;
 
+	if(_ep == 0 && _amt == 8)
+	{
+		printf("USB: Setup %02x %02x %02x %02x %02x %02x %02x %02x\n",
+				state->fifos[0],
+				state->fifos[1],
+				state->fifos[2],
+				state->fifos[3],
+				state->fifos[4],
+				state->fifos[5],
+				state->fifos[6],
+				state->fifos[7]);
+
+		eps->interrupt_status |= USB_EPINT_SetUp;
+	}
+
 	if(eps->dma_address)
 	{
+		printf("USB: DMA copying to 0x%08x.\n", eps->dma_address);
 		cpu_physical_memory_write(eps->dma_address, state->fifos, _amt);
 		eps->dma_address += _amt;
 	}
@@ -424,6 +458,8 @@ static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, uint8_t _ep)
 
 		if(rxfz > sizeof(_state->fifos))
 			hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
+
+		printf("USB: Starting OUT transfer on EP %d (%d)...\n", _ep, amtDone);
 
 		tcp_usb_recv(&_state->tcp_state, _ep, (char*)_state->fifos, amtDone,
 				synopsys_usb_out_ep_done, _state);
@@ -517,6 +553,38 @@ static uint32_t synopsys_usb_read(void *_arg, target_phys_addr_t _addr)
 	case GHWCFG4:
 		return state->ghwcfg4;
 
+	case GINTMSK:
+		return state->gintmsk;
+
+	case GINTSTS:
+		return state->gintsts;
+
+	case DAINTMSK:
+		return state->daintmsk;
+	
+	case DAINTSTS:
+		return state->daintsts;
+
+	case DCFG:
+		return state->dcfg;
+
+	case DSTS:
+		return state->dsts;
+
+	case GNPTXFSTS:
+		return 0xFFFFFFFF;
+
+	case GRXFSIZ:
+		return state->grxfsiz;
+
+	case GNPTXFSIZ:
+		return state->gnptxfsiz;
+
+	case DIEPTXF(1) ... DIEPTXF(USB_NUM_FIFOS+1):
+		_addr -= DIEPTXF(1);
+		_addr >>= 2;
+		return state->dptxfsiz[_addr];
+
 	case USB_INREGS ... (USB_INREGS + USB_EPREGS_SIZE - 4):
 		_addr -= USB_INREGS;
 		return synopsys_usb_in_ep_read(state, _addr >> 5, _addr & 0x1f);
@@ -524,6 +592,10 @@ static uint32_t synopsys_usb_read(void *_arg, target_phys_addr_t _addr)
 	case USB_OUTREGS ... (USB_OUTREGS + USB_EPREGS_SIZE - 4):
 		_addr -= USB_OUTREGS;
 		return synopsys_usb_out_ep_read(state, _addr >> 5, _addr & 0x1f);
+
+	case USB_FIFO_START ... USB_FIFO_END-4:
+		_addr -= USB_FIFO_START;
+		return *((uint32_t*)(&state->fifos[_addr]));
 	}
 
 	return 0;
@@ -614,13 +686,67 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 	case GRSTCTL:
 		if(_val & GRSTCTL_CORESOFTRESET)
 		{
-			// TODO: Do some reset stuff?
+			state->grstctl = GRSTCTL_CORESOFTRESET;
+
+			// Do reset stuff
+			if(state->server_host)
+			{
+				tcp_usb_cleanup(&state->tcp_state);
+				tcp_usb_init(&state->tcp_state);
+
+				printf("Connecting to USB server at %s:%d...\n",
+						state->server_host, state->server_port);
+
+				if(tcp_usb_connect(&state->tcp_state, state->server_host, state->server_port))
+					hw_error("Failed to connect to USB server.\n");
+			}
+
 			state->grstctl &= ~GRSTCTL_CORESOFTRESET;
 			state->grstctl |= GRSTCTL_AHBIDLE;
+			state->gintsts |= GINTMSK_RESET | GINTMSK_ENUMDONE;
+			synopsys_usb_update_irq(state);
 		}
 		else if(_val == 0)
 			state->grstctl = _val;
 
+		return;
+
+	case GINTMSK:
+		state->gintmsk = _val;
+		synopsys_usb_update_irq(state);
+		break;
+
+	case GINTSTS:
+		state->gintsts &=~ _val;
+		synopsys_usb_update_irq(state);
+		return;
+
+	case DAINTMSK:
+		state->daintmsk = _val;
+		synopsys_usb_update_irq(state);
+		return;
+	
+	case DAINTSTS:
+		state->daintsts &=~ _val;
+		synopsys_usb_update_irq(state);
+		return;
+
+	case DCFG:
+		state->dcfg = _val;
+		return;
+
+	case GRXFSIZ:
+		state->grxfsiz = _val;
+		return;
+
+	case GNPTXFSIZ:
+		state->gnptxfsiz = _val;
+		return;
+
+	case DIEPTXF(1) ... DIEPTXF(USB_NUM_FIFOS+1):
+		_addr -= DIEPTXF(1);
+		_addr >>= 2;
+		state->dptxfsiz[_addr] = _val;
 		return;
 
 	case USB_INREGS ... (USB_INREGS + USB_EPREGS_SIZE - 4):
@@ -631,6 +757,11 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 	case USB_OUTREGS ... (USB_OUTREGS + USB_EPREGS_SIZE - 4):
 		_addr -= USB_OUTREGS;
 		synopsys_usb_out_ep_write(state, _addr >> 5, _addr & 0x1f, _val);
+		return;
+
+	case USB_FIFO_START ... USB_FIFO_END-4:
+		_addr -= USB_FIFO_START;
+		*((uint32_t*)(&state->fifos[_addr])) = _val;
 		return;
 	}
 }
@@ -659,7 +790,35 @@ static void synopsys_usb_initial_reset(DeviceState *dev)
 	state->ghwcfg4 = 0x01f08024;
 
 	state->gintmsk = 0;
+	state->gintsts = 0;
 	state->daintmsk = 0;
+	state->daintsts = 0;
+
+	state->grxfsiz = 0x100;
+	state->gnptxfsiz = (0x100 << 16) | 0x100;
+
+	uint32_t counter = 0x200;
+	int i;
+	for(i = 0; i < USB_NUM_FIFOS; i++)
+	{
+		state->dptxfsiz[i] = (counter << 16) | 0x100;
+		counter += 0x100;
+	}
+
+	for(i = 0; i < USB_NUM_ENDPOINTS; i++)
+	{
+		synopsys_usb_ep_state *in = &state->in_eps[i];
+		in->control = 0;
+		in->dma_address = 0;
+		in->fifo = 0;
+		in->tx_size = 0;
+
+		synopsys_usb_ep_state *out = &state->out_eps[i];
+		out->control = 0;
+		out->dma_address = 0;
+		out->fifo = 0;
+		out->tx_size = 0;
+	}
 
 	synopsys_usb_update_irq(state);
 }
@@ -670,14 +829,6 @@ static int synopsys_usb_init(SysBusDevice *dev)
 		FROM_SYSBUS(synopsys_usb_state, dev);
 
 	tcp_usb_init(&state->tcp_state);
-	if(state->server_host)
-	{
-		printf("Connecting to USB server at %s:%d...\n",
-				state->server_host, state->server_port);
-
-		if(tcp_usb_connect(&state->tcp_state, state->server_host, state->server_port))
-			hw_error("Failed to connect to USB server.\n");
-	}
 
     int iomemtype = cpu_register_io_memory(synopsys_usb_readfn,
                                synopsys_usb_writefn, state, DEVICE_LITTLE_ENDIAN);

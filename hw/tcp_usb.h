@@ -33,12 +33,17 @@ typedef struct _tcp_usb_message
 	size_t size;
 	tcp_usb_callback_t callback;
 	void *arg;
+
+	pthread_mutex_t mutex;
+	pthread_cond_t avail;
+	pthread_cond_t sync;
 } tcp_usb_message_t;
 
 typedef struct _tcp_usb_state
 {
 	int socket;
 	pthread_t thread;
+	pthread_mutex_t write_mutex;
 	int closed;
 
 	uint32_t status;
@@ -60,6 +65,9 @@ uint32_t tcp_usb_state(tcp_usb_state_t *_state);
 
 int tcp_usb_recv(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t _amt, tcp_usb_callback_t _cb, void *_arg);
 int tcp_usb_send(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t _amt, tcp_usb_callback_t _cb, void *_arg);
+
+int tcp_usb_recv_sync(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t *_amt);
+int tcp_usb_send_sync(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t *_amt);
 
 typedef struct _tcp_usb_host_state
 {
