@@ -126,9 +126,10 @@ static void *tcp_usb_thread(void *_arg)
 			return NULL;
 		}
 
-		printf("USB: Got packet (%d): %02x %02x %04x.\n",
-				ret, header.type, header.ep, header.length);
+		//printf("USB: Got packet (%d): %02x %02x %04x.\n",
+		//		ret, header.type, header.ep, header.length);
 
+		int i;
 		tcp_usb_message_t *msg;
 		switch(header.type)
 		{
@@ -136,7 +137,6 @@ static void *tcp_usb_thread(void *_arg)
 			read_block(state->socket, &state->remote_status,
 					sizeof(state->remote_status));
 
-			int i;
 			for(i = 0; i < TCP_USB_NUM_EP; i++)
 			{
 				if(state->remote_status & (1 << i))
@@ -172,8 +172,27 @@ static void *tcp_usb_thread(void *_arg)
 			msg = &state->queued_writes[header.ep];
 
 			state->status &=~ (1 << header.ep);
+			pthread_mutex_lock(&msg->mutex);
+			pthread_cond_signal(&msg->avail);
+			pthread_mutex_unlock(&msg->mutex);
 
-			printf("USB: Write on EP %d (%d).\n", header.ep, msg->size);
+			//printf("USB: Write on EP %d (%d).\n", header.ep, msg->size);
+			
+			if(msg->size != 0xFFFF)
+			{
+				printf("Send:");
+				for(i = 0; i < msg->size; i++)
+				{
+					if((i%8) == 0)
+						printf("\t");
+					printf("%02x ", msg->data[i] & 0xFF);
+					if((i%8) == 7)
+						printf("\n");
+				}
+
+				if(!i || (i%8) != 0)
+					printf("\n");
+			}
 
 			tcp_usb_header_t shdr;
 			shdr.type = packet_data;
@@ -198,16 +217,32 @@ static void *tcp_usb_thread(void *_arg)
 
 			state->remote_status &=~ (1 << header.ep);
 
-			printf("USB: Read on EP %d (%d).\n", header.ep, header.length);
+			//printf("USB: Read on EP %d (%d).\n", header.ep, header.length);
 
 			if(msg->size < header.length)
 				printf("USB: warning overflow.\n");
 
-			if(msg->size && msg->size != 0xFFFF)
+			if(header.length && header.length != 0xFFFF)
 			{
 				ret = read_block(state->socket, msg->data, header.length);
 				if(ret < 0)
 					printf("USB: Second read failed with %d.\n", ret);
+			}
+
+			if(header.length != 0xFFFF)
+			{
+				printf("Recv:");
+				for(i = 0; i < header.length; i++)
+				{
+					if((i%8) == 0)
+						printf("\t");
+					printf("%02x ", msg->data[i] & 0xFF);
+					if((i%8) == 7)
+						printf("\n");
+				}
+
+				if(!i || (i%8) != 0)
+					printf("\n");
 			}
 
 			if(msg->callback)
@@ -292,11 +327,16 @@ int tcp_usb_recv(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t
 		pthread_mutex_unlock(&_state->write_mutex);
 	}
 
+	printf("%s exit.\n", __func__);
+
 	return 0;
 }
 
 int tcp_usb_send(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t _amt, tcp_usb_callback_t _cb, void *_arg)
 {
+	if(_state->status & (1 << _ep))
+		return -EBUSY;
+
 	tcp_usb_message_t *msg = &_state->queued_writes[_ep];
 	msg->data = (char*)_data;
 	msg->size = _amt;
@@ -311,15 +351,21 @@ int tcp_usb_send(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t
 
 static void tcp_usb_recv_complete(tcp_usb_state_t *_state, uint8_t _ep, size_t _amt, void *_arg)
 {
+	printf("%s.\n", __func__);
+
 	tcp_usb_message_t *msg = &_state->queued_reads[_ep];
 	pthread_mutex_lock(&msg->mutex);
 	pthread_cond_signal(&msg->sync);
 	*((size_t*)_arg) = _amt;
 	pthread_mutex_unlock(&msg->mutex);
+
+	printf("%s done.\n", __func__);
 }
 
 int tcp_usb_recv_sync(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, size_t *_amt)
 {
+	printf("%s.\n", __func__);
+
 	tcp_usb_message_t *msg = &_state->queued_reads[_ep];
 	pthread_mutex_lock(&msg->mutex);
 
@@ -329,6 +375,9 @@ int tcp_usb_recv_sync(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, s
 	int ret = tcp_usb_recv(_state, _ep, _data, *_amt, tcp_usb_recv_complete, _amt);
 	pthread_cond_wait(&msg->sync, &msg->mutex);
 	pthread_mutex_unlock(&msg->mutex);
+
+	printf("%s done.\n", __func__);
+
 	return ret;
 }
 
@@ -345,6 +394,10 @@ int tcp_usb_send_sync(tcp_usb_state_t *_state, uint8_t _ep, const char *_data, s
 {
 	tcp_usb_message_t *msg = &_state->queued_writes[_ep];
 	pthread_mutex_lock(&msg->mutex);
+
+	if(_state->status & (1 << _ep))
+		pthread_cond_wait(&msg->avail, &msg->mutex);
+
 	int ret = tcp_usb_send(_state, _ep, _data, *_amt, tcp_usb_send_complete, _amt);
 	pthread_cond_wait(&msg->sync, &msg->mutex);
 	pthread_mutex_unlock(&msg->mutex);
@@ -401,9 +454,15 @@ int tcp_usb_accept(tcp_usb_host_state_t *_host, tcp_usb_state_t *_client)
 
 	printf("USB: waiting on accept...\n");
 
-	_client->socket = accept(_host->socket, &addr, &addr_sz);
+	// TODO: This is returning -1 a lot, probably due to
+	// the magic in QEMU's internals, there should be a better
+	// fix than this.
+	while((_client->socket = accept(_host->socket, &addr, &addr_sz)) == -1);
 	if(_client->socket <= 0)
+	{
+		printf("USB: accept error %d.\n", errno);
 		return -EIO;
+	}
 
 	printf("USB: USB device accepted!\n");
 

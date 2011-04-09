@@ -374,18 +374,6 @@ static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, uint8_t _ep)
 			eps->dma_address += amtDone;
 		}
 
-		char *ptr = (char*)&_state->fifos[txfs];
-		printf("Wrote:");
-		int i;
-		for(i = 0; i < amtDone; i++)
-		{
-			if((i%8) == 0)
-				printf("\t");
-			printf("%02x ", ptr[i] & 0xFF);
-			if((i%8) == 7)
-				printf("\n");
-		}
-		
 		printf("USB: Starting IN transfer on EP %d (%d)...\n", _ep, amtDone);
 
 		if(!tcp_usb_okay(&_state->tcp_state))

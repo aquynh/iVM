@@ -105,23 +105,29 @@ static int passthrough_packet(USBDevice *s, USBPacket *p)
 	switch(p->pid)
 	{
 	case USB_TOKEN_SETUP:
+		tcp_usb_send(state->tcp, ep, (char*)p->data, sz, NULL, NULL);
+		printf("Host USB setup %d.\n", sz);
+		return sz;
+
 	case USB_TOKEN_OUT:
 		tcp_usb_send(state->tcp, ep, (char*)p->data, sz, NULL, NULL);
-		return 0;
+		printf("Host USB sent %d.\n", sz);
+		return sz;
 
 	case USB_TOKEN_IN:
 		if((tcp_usb_state(state->tcp) & (1 << ep)) == 0)
 			return USB_RET_NAK;
 
-		printf("Host USB: recv on EP %d (%d)...", ep, sz);
+		printf("Host USB: recv on EP %d (%d)...\n", ep, sz);
 		tcp_usb_recv_sync(state->tcp, ep, (char*)p->data, &sz);
 		if(sz == 0xFFFF)
 			return USB_RET_STALL;
 
+		printf("Host USB recv'd %d.\n", sz);
 		return sz;
 	}
 
-	return 0;
+	return USB_RET_STALL;
 }
 
 static void passthrough_destroy(USBDevice *dev)

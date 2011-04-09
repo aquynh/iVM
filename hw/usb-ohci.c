@@ -1005,7 +1005,7 @@ static int ohci_service_td(OHCIState *ohci, struct ohci_ed *ed)
             case USB_RET_NODEV:
                 OHCI_SET_BM(td.flags, TD_CC, OHCI_CC_DEVICENOTRESPONDING);
             case USB_RET_NAK:
-                DPRINTF("usb-ohci: got NAK\n");
+                //DPRINTF("usb-ohci: got NAK\n");
                 return 1;
             case USB_RET_STALL:
                 DPRINTF("usb-ohci: got STALL\n");
