@@ -20,12 +20,13 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <pthread.h>
+#include "qemu-thread.h"
 
 enum
 {
 	tcp_usb_setup = 1 << 0,
 	tcp_usb_reset = 1 << 1,
+	tcp_usb_enumdone = 1 << 2,
 };
 
 typedef struct _tcp_usb_header
@@ -43,7 +44,7 @@ typedef int (*tcp_usb_callback_t)(struct _tcp_usb_state *_status, void *_arg, tc
 typedef struct _tcp_usb_state
 {
 	int socket;
-	pthread_t thread;
+	QemuThread thread;
 	int closed;
 	
 	tcp_usb_callback_t callback;

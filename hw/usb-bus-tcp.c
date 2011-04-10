@@ -36,7 +36,7 @@ typedef struct _tcp_bus_state
 	uint32_t port;
 
 	int closed;
-	pthread_t thread;
+	QemuThread thread;
 	tcp_usb_host_state_t tcp_usb_state;
 	QLIST_HEAD(, tcp_usb_state_t) children;
 
@@ -70,78 +70,88 @@ static void passthrough_reset(USBDevice *dev)
 	tcp_usb_request(state->tcp, &header, NULL);
 }
 
-static int passthrough_packet(USBDevice *s, USBPacket *p)
+static int passthrough_control(USBDevice *dev, int request, int value,
+                                  int index, int length, uint8_t *data)
 {
-    switch(p->pid) {
-    case USB_MSG_ATTACH:
-        s->state = USB_STATE_ATTACHED;
-        if (s->info->handle_attach) {
-            s->info->handle_attach(s);
-        }
-        return 0;
-
-    case USB_MSG_DETACH:
-        s->state = USB_STATE_NOTATTACHED;
-        return 0;
-
-    case USB_MSG_RESET:
-        s->remote_wakeup = 0;
-        s->addr = 0;
-        s->state = USB_STATE_DEFAULT;
-        if (s->info->handle_reset) {
-            s->info->handle_reset(s);
-        }
-        return 0;
-    }
-
-    /* Rest of the PIDs must match our address */
-    if (s->state < USB_STATE_DEFAULT || p->devaddr != s->addr)
-        return USB_RET_NODEV;
-
-	tcp_passthrough_state_t *state = (tcp_passthrough_state_t*)s;
-	if(state->tcp->closed)
+	tcp_passthrough_state_t *state = DO_UPCAST(tcp_passthrough_state_t, dev, dev);
+	if(tcp_usb_closed(state->tcp))
 	{
-		usb_device_detach(s);
+		usb_device_detach(dev);
 		tcp_usb_cleanup(state->tcp);
 		state->tcp = NULL;
 		return USB_RET_STALL;
 	}
 
-	if(tcp_usb_closed(state->tcp))
-		return USB_RET_STALL;
+	tcp_usb_header_t header;
+	header.ep = 0;
+	header.flags = tcp_usb_setup;
+	header.addr = dev->addr;
+	header.length = 8;
 
+	uint8_t val = dev->setup_buf[1];
+	if(dev->setup_buf[1] == 5 && dev->setup_buf[0] == 0)
+		header.flags |= tcp_usb_enumdone;
+
+	printf("Host USB: Starting SETUP token! (%02x).\n", val);
+
+	int ret = tcp_usb_request(state->tcp, &header, (char*)dev->setup_buf);
+
+	if(ret >= 0)
+	{
+		do
+		{
+			header.ep = 0 | USB_DIR_IN;
+			header.flags = 0;
+			header.addr = dev->addr;
+			header.length = length;
+
+			ret = tcp_usb_request(state->tcp, &header, (char*)data);
+		}
+		while(ret == USB_RET_NAK);
+	}
+
+	if(ret != USB_RET_NAK)
+		printf("Host USB: SETUP token (%02x) (dev %d)-> 0x%08x.\n", val, header.addr, ret);
+	dev->addr = header.addr;
+	return ret;
+}
+
+static int passthrough_data(USBDevice *dev, USBPacket *p)
+{
+	tcp_passthrough_state_t *state = DO_UPCAST(tcp_passthrough_state_t, dev, dev);
+	if(tcp_usb_closed(state->tcp))
+	{
+		usb_device_detach(dev);
+		tcp_usb_cleanup(state->tcp);
+		state->tcp = NULL;
+		return USB_RET_STALL;
+	}
+
+	int ret = USB_RET_STALL;
 	tcp_usb_header_t header;
 	switch(p->pid)
 	{
-	case USB_TOKEN_SETUP:
-		header.ep = p->devep;
-		header.flags = tcp_usb_setup;
-		header.addr = 0;
-		header.length = p->len;
-
-		//printf("Host USB: SETUP token on %02x.\n", p->devep);
-
-		return tcp_usb_request(state->tcp, &header, (char*)p->data);
-
 	case USB_TOKEN_OUT:
-		header.ep = p->devep;
+		header.ep = p->devep & 0x7f;
 		header.flags = 0;
-		header.addr = 0;
+		header.addr = dev->addr;
 		header.length = p->len;
 		
-		//printf("Host USB: OUT token on %02x.\n", p->devep);
-
-		return tcp_usb_request(state->tcp, &header, (char*)p->data);
+		ret = tcp_usb_request(state->tcp, &header, (char*)p->data);
+		if(ret != USB_RET_NAK)
+			printf("Host USB: OUT token on %02x -> 0x%08x.\n", p->devep, ret);
+		return ret;
 
 	case USB_TOKEN_IN:
 		header.ep = p->devep | USB_DIR_IN;
 		header.flags = 0;
-		header.addr = 0;
+		header.addr = dev->addr;
 		header.length = p->len;
 
-		//printf("Host USB: IN token on %02x.\n", p->devep);
-
-		return tcp_usb_request(state->tcp, &header, (char*)p->data);
+		ret = tcp_usb_request(state->tcp, &header, (char*)p->data);
+		if(ret != USB_RET_NAK)
+			printf("Host USB: IN token on %02x -> 0x%08x.\n", p->devep, ret);
+		return ret;
 	}
 
 	return USB_RET_STALL;
@@ -157,7 +167,9 @@ static struct USBDeviceInfo tcp_passthrough_info = {
         .usbdevice_name = "passthrough",
         .qdev.size      = sizeof(tcp_passthrough_state_t),
         .init           = passthrough_init,
-        .handle_packet  = passthrough_packet,
+        .handle_packet  = usb_generic_handle_packet,
+		.handle_control = passthrough_control,
+		.handle_data    = passthrough_data,
         .handle_reset   = passthrough_reset,
         .handle_destroy = passthrough_destroy,
 };
@@ -226,7 +238,7 @@ static int tcp_bus_init(SysBusDevice *dev)
 		hw_error("Failed to bind USB server socket.\n");
 
 	printf("TCP USB server started!\n");
-	pthread_create(&state->thread, NULL, tcp_bus_thread, state);
+	qemu_thread_create(&state->thread, tcp_bus_thread, state);
 	return 0;
 }
 

@@ -36,16 +36,13 @@ void tcp_usb_init(tcp_usb_state_t *_state, tcp_usb_callback_t _cb, void *_arg)
 	_state->callback = _cb;
 	_state->callback_arg = _arg;
 	_state->socket = 0;
-	_state->thread = 0;
-	_state->closed = 0;
+	_state->closed = 1;
 }
 
 void tcp_usb_cleanup(tcp_usb_state_t *_state)
 {
-	_state->closed = 1;
-
-	if(_state->thread)
-		pthread_cancel(_state->thread);
+	if(!_state->closed)
+		_state->closed = 1;
 
 	if(_state->socket)
 		close(_state->socket);
@@ -64,16 +61,35 @@ static int read_block(int _sock, void *_data, size_t _amt)
 		return ret;
 
 	int done = ret;
-	_amt -= done;
 
 	while(done < _amt)
 	{
-		ret = read(_sock, ptr, _amt);
+		ret = read(_sock, ptr+done, _amt-done);
 		if(ret <= 0)
 			return done;
 		
 		done += ret;
-		_amt -= ret;
+	}
+
+	return done;
+}
+
+static int write_block(int _sock, void *_data, size_t _amt)
+{
+	char *ptr = _data;
+	int ret = write(_sock, _data, _amt);
+	if(ret <= 0)
+		return ret;
+
+	int done = ret;
+
+	while(done < _amt)
+	{
+		ret = write(_sock, ptr+done, _amt-done);
+		if(ret <= 0)
+			return ret;
+
+		done += ret;
 	}
 
 	return done;
@@ -98,7 +114,7 @@ static void *tcp_usb_thread(void *_arg)
 		if(header.length > 0)
 		{
 			data = malloc(header.length);
-			if(header.flags & tcp_usb_setup || (header.ep & USB_DIR_IN) == 0) // OUT
+			if((header.ep & USB_DIR_IN) == 0) // OUT
 			{
 				ret = read_block(state->socket, data, header.length);
 				if(ret <= 0)
@@ -115,7 +131,7 @@ static void *tcp_usb_thread(void *_arg)
 			len = state->callback(state, state->callback_arg, &header, data);
 
 		header.length = len;
-		ret = write(state->socket, &header, sizeof(header));
+		ret = write_block(state->socket, &header, sizeof(header));
 		if(ret <= 0)
 		{
 			printf("USB: Socket error %d, during header write.\n", ret);
@@ -123,10 +139,10 @@ static void *tcp_usb_thread(void *_arg)
 			return NULL;
 		}
 
-		if((header.flags & tcp_usb_setup || (header.ep & USB_DIR_IN) != 0)
+		if((header.ep & USB_DIR_IN) != 0
 				&& len > 0) // IN
 		{
-			ret = write(state->socket, data, len);
+			ret = write_block(state->socket, data, len);
 			if(ret <= 0)
 			{
 				printf("USB: Socket error %d, during data write.\n", ret);
@@ -139,6 +155,7 @@ static void *tcp_usb_thread(void *_arg)
 			free(data);
 	}
 
+	state->closed = 1;
 	return NULL;
 }
 
@@ -159,7 +176,8 @@ int tcp_usb_connect(tcp_usb_state_t *_state, char *_host, uint32_t _port)
 	if(connect(_state->socket, &server_addr, sizeof(server_addr)))
 		return -EIO;
 
-	pthread_create(&_state->thread, NULL, tcp_usb_thread, _state);
+	_state->closed = 0;
+	qemu_thread_create(&_state->thread, tcp_usb_thread, _state);
 
 	return 0;
 }
@@ -168,17 +186,16 @@ int tcp_usb_request(tcp_usb_state_t *_state, tcp_usb_header_t *_header, const ch
 {
 	//printf("%s.\n", __func__);
 
-	int ret = write(_state->socket, _header, sizeof(*_header));
+	int ret = write_block(_state->socket, _header, sizeof(*_header));
 	if(ret <= 0)
 	{
 		printf("%s: header write failed.\n", __func__);
 		return ret;
 	}
 
-	if(_header->length > 0 &&
-			(_header->flags & tcp_usb_setup || (_header->ep & USB_DIR_IN) == 0)) // OUT
+	if(_header->length > 0 && (_header->ep & USB_DIR_IN) == 0) // OUT
 	{
-		ret = write(_state->socket, (char*)_data, _header->length);
+		ret = write_block(_state->socket, (char*)_data, _header->length);
 		if(ret <= 0)
 		{
 			printf("%s: data write failed.\n", __func__);
@@ -186,17 +203,26 @@ int tcp_usb_request(tcp_usb_state_t *_state, tcp_usb_header_t *_header, const ch
 		}
 	}
 
-	ret = read_block(_state->socket, _header, sizeof(*_header));
+	do
+	{
+		ret = read_block(_state->socket, _header, sizeof(*_header));
+	}
+	while(ret == -1);
+
 	if(ret <= 0)
 	{
 		printf("%s: header read failed.\n", __func__);
 		return ret;
 	}
 
-	if(_header->length > 0 &&
-			(_header->flags & tcp_usb_setup || (_header->ep & USB_DIR_IN) != 0)) // IN
+	if(_header->length > 0 && (_header->ep & USB_DIR_IN) != 0) // IN
 	{
-		ret = read(_state->socket, (char*)_data, _header->length);
+		do
+		{
+			ret = read(_state->socket, (char*)_data, _header->length);
+		}
+		while(ret == -1);
+
 		if(ret <= 0)
 		{
 			printf("%s: data read failed.\n", __func__);
@@ -255,16 +281,14 @@ int tcp_usb_accept(tcp_usb_host_state_t *_host, tcp_usb_state_t *_client)
 
 	printf("USB: waiting on accept...\n");
 
-	// TODO: This is returning -1 a lot, probably due to
-	// the magic in QEMU's internals, there should be a better
-	// fix than this.
-	while((_client->socket = accept(_host->socket, &addr, &addr_sz)) == -1);
+	_client->socket = accept(_host->socket, &addr, &addr_sz);
 	if(_client->socket <= 0)
 	{
 		printf("USB: accept error %d.\n", errno);
 		return -EIO;
 	}
 
+	_client->closed = 0;
 	printf("USB: USB device accepted!\n");
 	return 0;
 }

@@ -307,9 +307,12 @@ static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 				_state->gintsts |= GINTMSK_INEP;
 		}
 	}
-
+	
 	if(_state->gintmsk & _state->gintsts)
+	{
+		printf("USB: IRQ triggered.\n");
 		qemu_irq_raise(_state->irq);
+	}
 	else
 		qemu_irq_lower(_state->irq);
 }
@@ -346,11 +349,19 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 {
 	synopsys_usb_state *state = _arg;
 
+	_hdr->addr = (state->dcfg & DCFG_DEVICEADDRMSK) >> DCFG_DEVICEADDR_SHIFT;
+
 	if(_hdr->flags & tcp_usb_reset)
 	{
 		state->gintsts |= GINTMSK_RESET;
 		synopsys_usb_update_irq(state);
 		return 0;
+	}
+
+	if(_hdr->flags & tcp_usb_enumdone)
+	{
+		state->gintsts |= GINTMSK_ENUMDONE;
+		synopsys_usb_update_irq(state);
 	}
 
 	uint8_t ep = _hdr->ep & 0x7f;
@@ -359,7 +370,11 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 		synopsys_usb_ep_state *eps = &state->in_eps[ep];
 
 		if(eps->control & USB_EPCON_STALL)
+		{
+			eps->control &=~ USB_EPCON_STALL; // Should this be EP0 only
+			printf("USB: Stall.\n");
 			return USB_RET_STALL;
+		}
 		else if(eps->control & USB_EPCON_ENABLE)
 		{
 			// Do IN transfer!
@@ -381,17 +396,20 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 			if(txfs + txfz > sizeof(state->fifos))
 				hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
 
-			if(eps->dma_address)
-			{
-				cpu_physical_memory_read(eps->dma_address, &state->fifos[txfs], amtDone);
-				eps->dma_address += amtDone;
-			}
-
 			printf("USB: Starting IN transfer on EP %d (%d)...\n", ep, amtDone);
 
-			memcpy(_buffer, (char*)&state->fifos[txfs], amtDone);
+			if(amtDone > 0)
+			{
+				if(eps->dma_address)
+				{
+					cpu_physical_memory_read(eps->dma_address, &state->fifos[txfs], amtDone);
+					eps->dma_address += amtDone;
+				}
 
-			printf("USB: IN tranfer complete!\n");
+				memcpy(_buffer, (char*)&state->fifos[txfs], amtDone);
+			}
+
+			printf("USB: IN transfer complete!\n");
 
 			eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
 							| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
@@ -408,7 +426,13 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 	{	
 		synopsys_usb_ep_state *eps = &state->out_eps[ep];
 		
-		if(eps->control & USB_EPCON_ENABLE)
+		if(eps->control & USB_EPCON_STALL)
+		{
+			eps->control &=~ USB_EPCON_STALL; // Should this be EP0 only
+			printf("USB: Stall.\n");
+			return USB_RET_STALL;
+		}
+		else if(eps->control & USB_EPCON_ENABLE)
 		{
 			// Do OUT transfer!
 			eps->control &=~ USB_EPCON_ENABLE;
@@ -427,7 +451,17 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 
 			printf("USB: Starting OUT transfer on EP %d (%d)...\n", ep, amtDone);
 
-			memcpy((char*)state->fifos, _buffer, amtDone);
+			if(amtDone > 0)
+			{
+				memcpy((char*)state->fifos, _buffer, amtDone);
+
+				if(eps->dma_address)
+				{
+					printf("USB: DMA copying to 0x%08x.\n", eps->dma_address);
+					cpu_physical_memory_write(eps->dma_address, state->fifos, amtDone);
+					eps->dma_address += amtDone;
+				}
+			}
 
 			printf("USB: OUT transfer complete!\n");
 
@@ -445,17 +479,11 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 
 				eps->interrupt_status |= USB_EPINT_SetUp;
 			}
-
-			if(eps->dma_address)
-			{
-				printf("USB: DMA copying to 0x%08x.\n", eps->dma_address);
-				cpu_physical_memory_write(eps->dma_address, state->fifos, amtDone);
-				eps->dma_address += amtDone;
-			}
+			else
+				eps->interrupt_status |= USB_EPINT_XferCompl;
 
 			eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
 							| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
-			eps->interrupt_status |= USB_EPINT_XferCompl;
 
 			synopsys_usb_update_irq(state);
 
@@ -706,7 +734,7 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 
 			state->grstctl &= ~GRSTCTL_CORESOFTRESET;
 			state->grstctl |= GRSTCTL_AHBIDLE;
-			state->gintsts |= GINTMSK_RESET | GINTMSK_ENUMDONE;
+			state->gintsts |= GINTMSK_RESET;
 			synopsys_usb_update_irq(state);
 		}
 		else if(_val == 0)
@@ -737,17 +765,24 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 	case DCTL:
 		if((_val & DCTL_SGNPINNAK) != (state->dctl & DCTL_SGNPINNAK)
 				&& (_val & DCTL_SGNPINNAK))
+		{
 			state->gintsts |= GINTMSK_GINNAKEFF;
+			_val &=~ DCTL_SGNPINNAK;
+		}
 
 		if((_val & DCTL_SGOUTNAK) != (state->dctl & DCTL_SGOUTNAK)
 				&& (_val & DCTL_SGOUTNAK))
+		{
 			state->gintsts |= GINTMSK_GOUTNAKEFF;
+			_val &=~ DCTL_SGOUTNAK;
+		}
 
 		state->dctl = _val;
 		synopsys_usb_update_irq(state);
 		return;
 
 	case DCFG:
+		printf("USB: dcfg = 0x%08x.\n", _val);
 		state->dcfg = _val;
 		return;
 
