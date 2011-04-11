@@ -242,14 +242,21 @@ typedef struct _synopsys_usb_state
 	uint32_t server_port;
 	tcp_usb_state_t tcp_state;
 
+	uint32_t pcgcctl;
+
 	uint32_t ghwcfg1;
 	uint32_t ghwcfg2;
 	uint32_t ghwcfg3;
 	uint32_t ghwcfg4;
 
+	uint32_t gahbcfg;
+	uint32_t gusbcfg;
+
 	uint32_t grxfsiz;
 	uint32_t gnptxfsiz;
 
+	uint32_t gotgctl;
+	uint32_t gotgint;
 	uint32_t grstctl;
 	uint32_t gintmsk;
 	uint32_t gintsts;
@@ -259,8 +266,11 @@ typedef struct _synopsys_usb_state
 	uint32_t dctl;
 	uint32_t dcfg;
 	uint32_t dsts;
+
 	uint32_t daintmsk;
 	uint32_t daintsts;
+	uint32_t diepmsk;
+	uint32_t doepmsk;
 
 	synopsys_usb_ep_state in_eps[USB_NUM_ENDPOINTS];
 	synopsys_usb_ep_state out_eps[USB_NUM_ENDPOINTS];
@@ -288,19 +298,22 @@ static inline size_t synopsys_usb_tx_fifo_size(synopsys_usb_state *_state, uint3
 static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 {
 	_state->daintsts = 0;
-	_state->gintsts &=~ (GINTMSK_OEP | GINTMSK_INEP);
+	_state->gintsts &=~ (GINTMSK_OEP | GINTMSK_INEP | GINTMSK_OTG);
+
+	if(_state->gotgint)
+		_state->gintsts |= GINTMSK_OTG;
 
 	int i;
 	for(i = 0; i < USB_NUM_ENDPOINTS; i++)
 	{
-		if(_state->out_eps[i].interrupt_status)
+		if(_state->out_eps[i].interrupt_status & _state->doepmsk)
 		{
 			_state->daintsts |= 1 << (i+DAINT_OUT_SHIFT);
 			if(_state->daintmsk & (1 << (i+DAINT_OUT_SHIFT)))
 				_state->gintsts |= GINTMSK_OEP;
 		}
 
-		if(_state->in_eps[i].interrupt_status)
+		if(_state->in_eps[i].interrupt_status & _state->diepmsk)
 		{
 			_state->daintsts |= 1 << (i+DAINT_IN_SHIFT);
 			if(_state->daintmsk & (1 << (i+DAINT_IN_SHIFT)))
@@ -310,14 +323,11 @@ static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 	
 	if(_state->gintmsk & _state->gintsts)
 	{
-		printf("USB: IRQ triggered.\n");
+		printf("USB: IRQ triggered 0x%08x & 0x%08x.\n", _state->gintsts, _state->gintmsk);
 		qemu_irq_raise(_state->irq);
 	}
 	else
-	{
-		printf("USB: IRQ lowered.\n");
 		qemu_irq_lower(_state->irq);
-	}
 }
 
 static void synopsys_usb_update_ep(synopsys_usb_state *_state, synopsys_usb_ep_state *_ep)
@@ -364,9 +374,9 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 	if(_hdr->flags & tcp_usb_enumdone)
 	{
 		state->gintsts |= GINTMSK_ENUMDONE;
-		synopsys_usb_update_irq(state);
 	}
 
+	int ret;
 	uint8_t ep = _hdr->ep & 0x7f;
 	if(_hdr->ep & USB_DIR_IN)
 	{
@@ -376,7 +386,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 		{
 			eps->control &=~ USB_EPCON_STALL; // Should this be EP0 only
 			printf("USB: Stall.\n");
-			return USB_RET_STALL;
+			ret = USB_RET_STALL;
 		}
 		else if(eps->control & USB_EPCON_ENABLE)
 		{
@@ -418,12 +428,10 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 							| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
 			eps->interrupt_status |= USB_EPINT_XferCompl;
 
-			synopsys_usb_update_irq(state);
-
-			return amtDone;
+			ret = amtDone;
 		}
 		else
-			return USB_RET_NAK;
+			ret = USB_RET_NAK;
 	}
 	else // OUT
 	{	
@@ -433,7 +441,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 		{
 			eps->control &=~ USB_EPCON_STALL; // Should this be EP0 only
 			printf("USB: Stall.\n");
-			return USB_RET_STALL;
+			ret = USB_RET_STALL;
 		}
 		else if(eps->control & USB_EPCON_ENABLE)
 		{
@@ -488,13 +496,14 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 			eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
 							| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
 
-			synopsys_usb_update_irq(state);
-
-			return amtDone;
+			ret = amtDone;
 		}
 		else
-			return USB_RET_NAK;
+			ret = USB_RET_NAK;
 	}
+
+	synopsys_usb_update_irq(state);
+	return ret;
 }
 
 static uint32_t synopsys_usb_in_ep_read(synopsys_usb_state *_state, uint8_t _ep, target_phys_addr_t _addr)
@@ -566,9 +575,20 @@ static uint32_t synopsys_usb_out_ep_read(synopsys_usb_state *_state, int _ep, ta
 static uint32_t synopsys_usb_read(void *_arg, target_phys_addr_t _addr)
 {
 	synopsys_usb_state *state = _arg;
+	
+	//printf("USB: Read 0x%08x.\n", _addr);
 
 	switch(_addr)
 	{
+	case PCGCCTL:
+		return state->pcgcctl;
+
+	case GOTGCTL:
+		return state->gotgctl;
+
+	case GOTGINT:
+		return state->gotgint;
+
 	case GRSTCTL:
 		return state->grstctl;
 
@@ -584,11 +604,23 @@ static uint32_t synopsys_usb_read(void *_arg, target_phys_addr_t _addr)
 	case GHWCFG4:
 		return state->ghwcfg4;
 
+	case GAHBCFG:
+		return state->gahbcfg;
+
+	case GUSBCFG:
+		return state->gusbcfg;
+
 	case GINTMSK:
 		return state->gintmsk;
 
 	case GINTSTS:
 		return state->gintsts;
+
+	case DIEPMSK:
+		return state->diepmsk;
+
+	case DOEPMSK:
+		return state->doepmsk;
 
 	case DAINTMSK:
 		return state->daintmsk;
@@ -630,6 +662,9 @@ static uint32_t synopsys_usb_read(void *_arg, target_phys_addr_t _addr)
 	case USB_FIFO_START ... USB_FIFO_END-4:
 		_addr -= USB_FIFO_START;
 		return *((uint32_t*)(&state->fifos[_addr]));
+
+	default:
+		hw_error("USB: Unhandled read address 0x%08x!\n", _addr);
 	}
 
 	return 0;
@@ -714,9 +749,23 @@ static void synopsys_usb_out_ep_write(synopsys_usb_state *_state, int _ep, targe
 static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _val)
 {
 	synopsys_usb_state *state = _arg;
+	
+	//printf("USB: Write 0x%08x to 0x%08x.\n", _val, _addr);
 
 	switch(_addr)
 	{
+	case PCGCCTL:
+		return;
+
+	case GOTGCTL:
+		state->gotgctl = _val;
+		break;
+
+	case GOTGINT:
+		state->gotgint &=~ _val;
+		synopsys_usb_update_irq(state);
+		return;
+
 	case GRSTCTL:
 		if(_val & GRSTCTL_CORESOFTRESET)
 		{
@@ -758,6 +807,16 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 		synopsys_usb_update_irq(state);
 		return;
 
+	case DOEPMSK:
+		state->doepmsk = _val;
+		synopsys_usb_update_irq(state);
+		return;
+
+	case DIEPMSK:
+		state->diepmsk = _val;
+		synopsys_usb_update_irq(state);
+		return;
+
 	case DAINTMSK:
 		state->daintmsk = _val;
 		synopsys_usb_update_irq(state);
@@ -766,6 +825,14 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 	case DAINTSTS:
 		state->daintsts &=~ _val;
 		synopsys_usb_update_irq(state);
+		return;
+
+	case GAHBCFG:
+		state->gahbcfg = _val;
+		return;
+
+	case GUSBCFG:
+		state->gusbcfg = _val;
 		return;
 
 	case DCTL:
@@ -820,6 +887,9 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 		_addr -= USB_FIFO_START;
 		*((uint32_t*)(&state->fifos[_addr])) = _val;
 		return;
+
+	default:
+		hw_error("USB: Unhandled write address 0x%08x!\n", _addr);
 	}
 }
 
@@ -840,20 +910,32 @@ static void synopsys_usb_initial_reset(DeviceState *dev)
 	synopsys_usb_state *state =
 		FROM_SYSBUS(synopsys_usb_state, sysbus_from_qdev(dev));
 
+	state->pcgcctl = 0;
+
 	// Values from iPhone 2G.
 	state->ghwcfg1 = 0;
 	state->ghwcfg2 = 0x7a8f60d0;
 	state->ghwcfg3 = 0x082000e8;
 	state->ghwcfg4 = 0x01f08024;
 
+	state->gahbcfg = 0;
+	state->gusbcfg = 0;
+
 	state->dctl = 0;
 	state->dcfg = 0;
 	state->dsts = 0;
 
+	state->gotgctl = 0;
+	state->gotgint = 0;
+
 	state->gintmsk = 0;
 	state->gintsts = 0;
+
 	state->daintmsk = 0;
 	state->daintsts = 0;
+
+	state->diepmsk = 0;
+	state->doepmsk = 0;
 
 	state->grxfsiz = 0x100;
 	state->gnptxfsiz = (0x100 << 16) | 0x100;

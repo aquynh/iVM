@@ -273,11 +273,6 @@ static int passthrough_data(USBDevice *dev, USBPacket *p)
 	if(state->tcp == NULL)
 		return USB_RET_STALL;
 
-	if(state->packet)
-		return USB_RET_NAK;
-
-	state->packet = p;
-
 	int ret = USB_RET_STALL;
 	tcp_usb_header_t *header = &state->header;
 	switch(p->pid)
