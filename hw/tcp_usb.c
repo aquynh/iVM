@@ -31,6 +31,8 @@
 #include "usb.h"
 #include "tcp_usb.h"
 
+//#define DEBUG_TCP_USB
+
 void tcp_usb_init(tcp_usb_state_t *_state, tcp_usb_callback_t _cb, tcp_usb_closed_t _closed, void *_arg)
 {
 	_state->data_callback = _cb;
@@ -72,22 +74,31 @@ static void tcp_usb_do_closed(tcp_usb_state_t *_state)
 		_state->closed_callback(_state, _state->callback_arg);
 }
 
-/*static void hexdump(const void *_data, size_t _amt)
+#ifdef DEBUG_TCP_USB
+static void hexdump(const void *_data, size_t _amt)
 {
 	char *ptr = (char*)_data;
 	int i;
 	for(i = 0; i < _amt; i++)
 	{
 		if((i%8) == 0)
-			printf("\t");
-		printf("%02x ", (ptr[i] & 0xFF));
+			fprintf(stderr, "\t");
+
+		fprintf(stderr, "%02x ", (ptr[i] & 0xFF));
+
 		if((i%8) == 7)
-			printf("\n");
+			fprintf(stderr, "\n");
 	}
 
 	if((i%8) != 0)
-		printf("\n");
-}*/
+		fprintf(stderr, "\n");
+}
+#	define debug_hexdump(title, data, amt); fprintf(stderr, title); hexdump((data), (amt));
+#	define debug_printf(args...) fprintf(stderr, args);
+#else
+#	define debug_hexdump(a, b, c)
+#	define debug_printf(a...)
+#endif // DEBUG_TCP_USB
 
 static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_write)
 {
@@ -101,7 +112,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 		if(!_can_read)
 			return;
 
-		//printf("%s: tcp_usb_idle.\n", __func__);
+		debug_printf("%s: tcp_usb_idle.\n", __func__);
 
 		// Receiving new request
 		state->header = malloc(sizeof(*state->header));
@@ -110,7 +121,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 
 		// Fall through
 	case tcp_usb_read_request:
-		//printf("%s: tcp_usb_read_request\n", __func__);
+		debug_printf("%s: tcp_usb_read_request\n", __func__);
 
 		if(state->amount_done < sizeof(*state->header))
 		{
@@ -137,8 +148,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header))
 				return;
 
-			//printf("Got Header:");
-			//hexdump(state->header, sizeof(*state->header));
+			debug_hexdump("tcp_usb: Got Header: ", state->header, sizeof(*state->header));
 
 			if(state->header->length > 0)
 				state->buffer = malloc(state->header->length);
@@ -173,8 +183,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header) + state->header->length)
 				return;
 
-			//printf("Read:");
-			//hexdump(state->buffer, state->header->length);
+			debug_hexdump("tcp_usb: Read: ", state->buffer, state->header->length);
 		}
 
 		// Transfer complete! Call callback!
@@ -183,7 +192,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			state->state = tcp_usb_write_response;
 			state->amount_done = 0;
 
-			//printf("tcp_usb: Calling callback.\n");
+			debug_printf("tcp_usb: Calling callback.\n");
 			ret = state->data_callback(state, state->callback_arg, state->header, state->buffer);
 			state->header->length = ret;
 		}
@@ -196,7 +205,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 
 		// Fall through
 	case tcp_usb_write_response:
-		//printf("%s: tcp_usb_write_response\n", __func__);
+		debug_printf("%s: tcp_usb_write_response\n", __func__);
 
 		if(state->amount_done < sizeof(*state->header))
 		{
@@ -225,8 +234,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header))
 				return;
 			
-			//printf("Sent Header:");
-			//hexdump(state->header, sizeof(*state->header));
+			debug_hexdump("tcp_usb: Sent Header: ", state->header, sizeof(*state->header));
 		}
 
 		if((state->header->ep & USB_DIR_IN) != 0 && state->header->length > 0) // IN
@@ -256,8 +264,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header) + state->header->length)
 				return;
 
-			//printf("Wrote:");
-			//hexdump(state->buffer, state->header->length);
+			debug_hexdump("tcp_usb: Wrote: ", state->buffer, state->header->length);
 		}
 
 		free(state->header);
@@ -267,7 +274,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 		break;
 
 	case tcp_usb_write_request:
-		//printf("%s: tcp_usb_write_request\n", __func__);
+		debug_printf("%s: tcp_usb_write_request\n", __func__);
 
 		if(state->amount_done < sizeof(*state->header))
 		{
@@ -293,8 +300,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header))
 				return;
 
-			//printf("Sent Header:");
-			//hexdump(state->header, sizeof(*state->header));
+			debug_hexdump("tcp_usb: Sent Header: ", state->header, sizeof(*state->header));
 		}
 
 		if((state->header->ep & USB_DIR_IN) == 0 && state->header->length > 0) // OUT
@@ -321,8 +327,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header) + state->header->length)
 				return;
 			
-			//printf("Wrote:");
-			//hexdump(state->buffer, state->header->length);
+			debug_hexdump("tcp_usb: Wrote: ", state->buffer, state->header->length);
 		}
 
 		state->state = tcp_usb_read_response;
@@ -330,7 +335,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 
 		// Fall through
 	case tcp_usb_read_response:
-		//printf("%s: tcp_usb_read_response\n", __func__);
+		debug_printf("%s: tcp_usb_read_response\n", __func__);
 
 		if(state->amount_done < sizeof(*state->header))
 		{
@@ -356,8 +361,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header))
 				return;
 
-			//printf("Got Header:");
-			//hexdump(state->header, sizeof(*state->header));
+			debug_hexdump("tcp_usb: Got Header: ", state->header, sizeof(*state->header));
 		}
 		
 		if((state->header->ep & USB_DIR_IN) != 0 && state->header->length > 0) // IN
@@ -384,8 +388,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 			if(state->amount_done < sizeof(*state->header) + state->header->length)
 				return;
 			
-			//printf("Read:");
-			//hexdump(state->buffer, state->header->length);
+			debug_hexdump("tcp_usb: Read: ", state->buffer, state->header->length);
 		}
 
 		state->state = tcp_usb_idle;
@@ -393,7 +396,7 @@ static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_wri
 		// Transfer complete! Call callback!
 		if(state->data_callback)
 		{
-			//printf("tcp_usb: calling callback!\n");
+			debug_printf("tcp_usb: calling callback!\n");
 			state->data_callback(state, state->callback_arg, state->header, state->buffer);
 			return;
 		}
@@ -435,7 +438,7 @@ int tcp_usb_connect(tcp_usb_state_t *_state, char *_host, uint32_t _port)
 
 	int ret = connect(_state->socket, &server_addr, sizeof(server_addr));
 	if(ret < 0)
-		return ret;
+		return -EIO;
 
 	_state->closed = 0;
 	int flags = fcntl(_state->socket, F_GETFL, 0);
@@ -446,12 +449,12 @@ int tcp_usb_connect(tcp_usb_state_t *_state, char *_host, uint32_t _port)
 
 int tcp_usb_request(tcp_usb_state_t *_state, tcp_usb_header_t *_header, const char *_data)
 {
-	printf("%s.\n", __func__);
+	debug_printf("%s.\n", __func__);
 
 	if(_state->state != tcp_usb_idle)
 		return -EBUSY;
 
-	printf("%s starting request.\n", __func__);
+	debug_printf("%s starting request.\n", __func__);
 	
 	_state->state = tcp_usb_write_request;
 	_state->amount_done = 0;
@@ -464,13 +467,16 @@ int tcp_usb_request(tcp_usb_state_t *_state, tcp_usb_header_t *_header, const ch
 
 void tcp_usb_host_init(tcp_usb_host_state_t *_state)
 {
-	_state->socket = 0;
+	_state->socket = -1;
 }
 
 void tcp_usb_host_cleanup(tcp_usb_host_state_t *_state)
 {
-	if(_state->socket)
+	if(_state->socket >= 0)
+	{
 		close(_state->socket);
+		_state->socket = -1;
+	}
 }
 
 int tcp_usb_host_okay(tcp_usb_host_state_t *_state)
@@ -481,7 +487,7 @@ int tcp_usb_host_okay(tcp_usb_host_state_t *_state)
 int tcp_usb_host(tcp_usb_host_state_t *_state, uint32_t _port)
 {
 	_state->socket = socket(AF_INET, SOCK_STREAM, 0);
-	if(!_state->socket)
+	if(_state->socket < 0)
 		return -EIO;
 	
 	struct linger linger;
@@ -506,19 +512,19 @@ int tcp_usb_accept(tcp_usb_host_state_t *_host, tcp_usb_state_t *_client)
 	struct sockaddr_in addr;
 	size_t addr_sz = sizeof(addr);
 
-	printf("USB: waiting on accept...\n");
+	debug_printf("%s: waiting on accept...\n", __func__);
 
 	_client->socket = accept(_host->socket, &addr, &addr_sz);
-	if(_client->socket <= 0)
+	if(_client->socket < 0)
 	{
-		printf("USB: accept error %d.\n", errno);
-		return -errno;
+		fprintf(stderr, "%s: accept error %d.\n", __func__, errno);
+		return -EIO;
 	}
 
 	_client->closed = 0;
 	int flags = fcntl(_client->socket, F_GETFL, 0);
 	fcntl(_client->socket, F_SETFL, flags | O_NONBLOCK);
 	qemu_set_fd_handler(_client->socket, tcp_usb_read_callback, tcp_usb_write_callback, _client);
-	printf("USB: USB device accepted!\n");
+	debug_printf("%s: USB device accepted!\n", __func__);
 	return 0;
 }

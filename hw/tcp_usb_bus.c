@@ -26,8 +26,16 @@
 #include "hw.h"
 #include "tcp_usb.h"
 
-#define DEVICE_NAME		"usb_tcp_bus"
-#define NUM_PORTS		5
+#define DEVICE_NAME		"tcp_usb_bus"
+
+//#define TCP_USB_BUS_DEBUG
+
+#ifdef TCP_USB_BUS_DEBUG
+#	define debug_printf(args...) fprintf(stderr, DEVICE_NAME ": " args);
+#else
+#	define debug_printf(args...)
+#endif
+
 
 typedef struct _tcp_bus_state
 {
@@ -61,17 +69,17 @@ static int passthrough_tcp(tcp_usb_state_t *_state, void *_arg, tcp_usb_header_t
 
 	if(_hdr->flags & tcp_usb_reset)
 	{
-		printf("%s: reset.\n", __func__);
+		debug_printf("%s: reset.\n", __func__);
 		return 0;
 	}
 
 	if(state->packet == NULL)
 	{
-		printf("%s: no packet.\n", __func__);
+		debug_printf("%s: no packet.\n", __func__);
 		return 0;
 	}
 
-	printf("%s: completing packet len = %d!\n", __func__, _hdr->length);
+	debug_printf("%s: completing packet len = %d!\n", __func__, _hdr->length);
 	state->packet->len = _hdr->length;
 	usb_packet_complete(state->packet);
 	state->packet = NULL;
@@ -86,12 +94,12 @@ static void passthrough_cancel(USBPacket *_packet, void *_arg)
 	state->cancelled = 1;
 	state->packet = NULL;
 
-	printf("%s.\n", __func__);
+	debug_printf("%s.\n", __func__);
 }
 
 static void passthrough_closed(tcp_usb_state_t *_state, void *_arg)
 {
-	printf("%s.\n", __func__);
+	debug_printf("%s.\n", __func__);
 
 	tcp_passthrough_state_t *state = _arg;
 	if(!state)
@@ -103,11 +111,7 @@ static void passthrough_closed(tcp_usb_state_t *_state, void *_arg)
 	free(_state);
 
 	if(_arg)
-	{
 		usb_device_detach(&state->dev);
-		//qdev_unplug(&state->dev.qdev);
-		//qdev_free(&state->dev.qdev);
-	}
 }
 
 static int passthrough_init(USBDevice *dev)
@@ -128,7 +132,7 @@ static void passthrough_reset(USBDevice *dev)
 
 	state->packet = NULL;
 
-	printf("%s: reset!\n", __func__);
+	debug_printf("%s: reset!\n", __func__);
 
 	tcp_usb_header_t *header = &state->header;
 	header->addr = 0;
@@ -140,7 +144,7 @@ static void passthrough_reset(USBDevice *dev)
 
 static int do_token_setup(tcp_passthrough_state_t *s, USBPacket *p)
 {
-	printf("%s.\n", __func__);
+	debug_printf("%s.\n", __func__);
 
     int request, value, index;
 
@@ -166,7 +170,7 @@ static int do_token_setup(tcp_passthrough_state_t *s, USBPacket *p)
 	usb_defer_packet(p, passthrough_cancel, s);
 	if(tcp_usb_request(s->tcp, &s->header, (char*)p->data) < 0)
 	{
-		printf("tcp_usb: SETUP fail'd!\n");
+		debug_printf("tcp_usb: SETUP fail'd!\n");
 		return USB_RET_STALL;
 	}
 
@@ -175,7 +179,7 @@ static int do_token_setup(tcp_passthrough_state_t *s, USBPacket *p)
 
 static int do_token_in(tcp_passthrough_state_t *s, USBPacket *p)
 {
-	printf("%s.\n", __func__);
+	debug_printf("%s.\n", __func__);
 
 	s->header.ep = p->devep | USB_DIR_IN;
 	s->header.length = s->dev.setup_len;
@@ -185,7 +189,7 @@ static int do_token_in(tcp_passthrough_state_t *s, USBPacket *p)
 	usb_defer_packet(p, passthrough_cancel, s);
 	if(tcp_usb_request(s->tcp, &s->header, (char*)p->data) < 0)
 	{
-		printf("tcp_usb: IN 0 fail'd.\n");
+		debug_printf("tcp_usb: IN 0 fail'd.\n");
 		return USB_RET_STALL;
 	}
 
@@ -194,7 +198,7 @@ static int do_token_in(tcp_passthrough_state_t *s, USBPacket *p)
 
 static int do_token_out(tcp_passthrough_state_t *s, USBPacket *p)
 {
-	printf("%s.\n", __func__);
+	debug_printf("%s.\n", __func__);
 
 	s->header.ep = p->devep & 0x7f;
 	s->header.length = p->len;
@@ -204,7 +208,7 @@ static int do_token_out(tcp_passthrough_state_t *s, USBPacket *p)
 	usb_defer_packet(p, passthrough_cancel, s);
 	if(tcp_usb_request(s->tcp, &s->header, (char*)p->data) < 0)
 	{
-		printf("tcp_usb: OUT 0 fail'd.\n");
+		debug_printf("tcp_usb: OUT 0 fail'd.\n");
 		return USB_RET_STALL;
 	}
 
@@ -242,11 +246,6 @@ static int passthrough_packet(USBDevice *s, USBPacket *p)
 	tcp_passthrough_state_t *state = DO_UPCAST(tcp_passthrough_state_t, dev, s);
 	if(state->tcp == NULL)
 		return USB_RET_STALL;
-	/*else if(tcp_usb_closed(state->tcp))
-	{
-		passthrough_closed(state->tcp, state);
-		return USB_RET_STALL;
-	}*/
 
 	if(state->packet)
 		return USB_RET_NAK;
@@ -273,14 +272,6 @@ static int passthrough_data(USBDevice *dev, USBPacket *p)
 	tcp_passthrough_state_t *state = DO_UPCAST(tcp_passthrough_state_t, dev, dev);
 	if(state->tcp == NULL)
 		return USB_RET_STALL;
-	/*else if(tcp_usb_closed(state->tcp))
-	{
-		passthrough_closed(state->tcp, state);
-		usb_device_detach(dev);
-		tcp_usb_cleanup(state->tcp);
-		state->tcp = NULL;
-		return USB_RET_STALL;
-	}*/
 
 	if(state->packet)
 		return USB_RET_NAK;
@@ -302,7 +293,7 @@ static int passthrough_data(USBDevice *dev, USBPacket *p)
 		if(ret < 0)
 			return USB_RET_NAK;
 
-		printf("Host USB: OUT token on %02x -> 0x%08x.\n", p->devep, ret);
+		debug_printf("Host USB: OUT token on %02x -> 0x%08x.\n", p->devep, ret);
 		return USB_RET_ASYNC;
 
 	case USB_TOKEN_IN:
@@ -316,7 +307,7 @@ static int passthrough_data(USBDevice *dev, USBPacket *p)
 		if(ret < 0)
 			return USB_RET_NAK;
 
-		printf("Host USB: IN token on %02x -> 0x%08x.\n", p->devep, ret);
+		debug_printf("Host USB: IN token on %02x -> 0x%08x.\n", p->devep, ret);
 		return USB_RET_ASYNC;
 	}
 
@@ -342,32 +333,25 @@ static struct USBDeviceInfo tcp_passthrough_info = {
 static void *tcp_bus_thread(void *_arg)
 {
 	tcp_bus_state_t *state = _arg;
-	int fails = 0;
 
 	while(state->closed == 0)
 	{
 		tcp_usb_state_t *newState = malloc(sizeof(*newState));
 		tcp_usb_init(newState, passthrough_tcp, passthrough_closed, NULL);
 
-		while(tcp_usb_accept(&state->tcp_usb_state, newState) < 0)
+		if(tcp_usb_accept(&state->tcp_usb_state, newState) < 0)
 		{
-			fails++;
-			if(fails > 25)
-			{
-				printf("USB: Connection failure!\n");
-				tcp_usb_cleanup(newState);
-				free(newState);
-				state->closed = 1;
-				return NULL;
-			}
-		}
+			fprintf(stderr, "%s: Failed to accept socket.\n", __func__);
 
-		fails = 0;
+			tcp_usb_cleanup(newState);
+			free(newState);
+			continue;
+		}
 
 		USBBus *bus = usb_bus_find(-1);
 		if(bus == NULL)
 		{
-			printf("USB: No bus to attach networked device to!\n");
+			fprintf(stderr, "%s: No bus to attach networked device to!\n", __func__);
 			tcp_usb_cleanup(newState);
 			free(newState);
 			state->closed = 1;
@@ -402,7 +386,7 @@ static int tcp_bus_init(SysBusDevice *dev)
 	if(tcp_usb_host(&state->tcp_usb_state, state->port) < 0)
 		hw_error("Failed to bind USB server socket.\n");
 
-	printf("TCP USB server started!\n");
+	printf("TCP USB server started on port %d!\n", state->port);
 	qemu_thread_create(&state->thread, tcp_bus_thread, state);
 	return 0;
 }

@@ -314,7 +314,10 @@ static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 		qemu_irq_raise(_state->irq);
 	}
 	else
+	{
+		printf("USB: IRQ lowered.\n");
 		qemu_irq_lower(_state->irq);
+	}
 }
 
 static void synopsys_usb_update_ep(synopsys_usb_state *_state, synopsys_usb_ep_state *_ep)
@@ -731,6 +734,8 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 				int ret = tcp_usb_connect(&state->tcp_state, state->server_host, state->server_port);
 				if(ret < 0)
 					hw_error("Failed to connect to USB server (%d).\n", ret);
+
+				printf("Connected to USB server.\n");
 			}
 
 			state->grstctl &= ~GRSTCTL_CORESOFTRESET;

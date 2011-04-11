@@ -229,7 +229,7 @@ obj-i386-$(CONFIG_SPICE) += qxl.o qxl-logger.o qxl-render.o
 
 # TCP USB
 obj-y += tcp_usb.o
-obj-i386-y += usb-bus-tcp.o
+obj-i386-y += tcp_usb_bus.o
 
 # shared objects
 obj-ppc-y = ppc.o
