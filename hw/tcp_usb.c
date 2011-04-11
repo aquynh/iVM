@@ -31,21 +31,27 @@
 #include "usb.h"
 #include "tcp_usb.h"
 
-void tcp_usb_init(tcp_usb_state_t *_state, tcp_usb_callback_t _cb, void *_arg)
+void tcp_usb_init(tcp_usb_state_t *_state, tcp_usb_callback_t _cb, tcp_usb_closed_t _closed, void *_arg)
 {
-	_state->callback = _cb;
+	_state->data_callback = _cb;
+	_state->closed_callback = _closed;
 	_state->callback_arg = _arg;
-	_state->socket = 0;
+
+	_state->socket = -1;
 	_state->closed = 1;
+
+	_state->state = tcp_usb_idle;
+	_state->amount_done = 0;
 }
 
 void tcp_usb_cleanup(tcp_usb_state_t *_state)
 {
-	if(!_state->closed)
-		_state->closed = 1;
-
-	if(_state->socket)
+	if(_state->socket >= 0)
+	{
 		close(_state->socket);
+		qemu_set_fd_handler(_state->socket, NULL, NULL, NULL);
+		_state->socket = -1;
+	}
 }
 
 int tcp_usb_closed(tcp_usb_state_t *_state)
@@ -53,110 +59,364 @@ int tcp_usb_closed(tcp_usb_state_t *_state)
 	return _state->closed != 0;
 }
 
-static int read_block(int _sock, void *_data, size_t _amt)
+static void tcp_usb_do_closed(tcp_usb_state_t *_state)
 {
-	char *ptr = _data;
-	int ret = read(_sock, ptr, _amt);
-	if(ret <= 0)
-		return ret;
+	if(_state->closed)
+		return;
 
-	int done = ret;
+	_state->closed = 1;
 
-	while(done < _amt)
+	qemu_set_fd_handler(_state->socket, NULL, NULL, NULL);
+
+	if(_state->closed_callback)
+		_state->closed_callback(_state, _state->callback_arg);
+}
+
+/*static void hexdump(const void *_data, size_t _amt)
+{
+	char *ptr = (char*)_data;
+	int i;
+	for(i = 0; i < _amt; i++)
 	{
-		ret = read(_sock, ptr+done, _amt-done);
-		if(ret <= 0)
-			return done;
+		if((i%8) == 0)
+			printf("\t");
+		printf("%02x ", (ptr[i] & 0xFF));
+		if((i%8) == 7)
+			printf("\n");
+	}
+
+	if((i%8) != 0)
+		printf("\n");
+}*/
+
+static void tcp_usb_callback(tcp_usb_state_t *state, int _can_read, int _can_write)
+{
+	if(state->closed)
+		return;
+
+	int ret;
+	switch(state->state)
+	{
+	case tcp_usb_idle:
+		if(!_can_read)
+			return;
+
+		//printf("%s: tcp_usb_idle.\n", __func__);
+
+		// Receiving new request
+		state->header = malloc(sizeof(*state->header));
+		state->amount_done = 0;
+		state->state = tcp_usb_read_request;
+
+		// Fall through
+	case tcp_usb_read_request:
+		//printf("%s: tcp_usb_read_request\n", __func__);
+
+		if(state->amount_done < sizeof(*state->header))
+		{
+			ret = read(state->socket,
+					((char*)state->header) + state->amount_done,
+					sizeof(*state->header) - state->amount_done);
+			if(ret == 0 && _can_read)
+			{
+				free(state->header);
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d reading request header!\n", ret);
+				return;
+			}
+
+			_can_read = 0;
+			state->amount_done += ret;
+
+			if(state->amount_done < sizeof(*state->header))
+				return;
+
+			//printf("Got Header:");
+			//hexdump(state->header, sizeof(*state->header));
+
+			if(state->header->length > 0)
+				state->buffer = malloc(state->header->length);
+			else
+				state->buffer = NULL;
+		}
+
+		if((state->header->ep & USB_DIR_IN) == 0 && state->header->length > 0) // OUT
+		{
+			ret = read(state->socket,
+					((char*)state->buffer) + (state->amount_done - sizeof(*state->header)),
+					state->header->length - (state->amount_done - sizeof(*state->header)));
+			if(ret == 0 && _can_read)
+			{
+				free(state->header);
+				if(state->buffer)
+					free(state->buffer);
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d reading request data!\n", ret);
+				return;
+			}
+
+			_can_read = 0;
+			state->amount_done += ret;
+
+			if(state->amount_done < sizeof(*state->header) + state->header->length)
+				return;
+
+			//printf("Read:");
+			//hexdump(state->buffer, state->header->length);
+		}
+
+		// Transfer complete! Call callback!
+		if(state->data_callback)
+		{
+			state->state = tcp_usb_write_response;
+			state->amount_done = 0;
+
+			//printf("tcp_usb: Calling callback.\n");
+			ret = state->data_callback(state, state->callback_arg, state->header, state->buffer);
+			state->header->length = ret;
+		}
+		else
+		{
+			fprintf(stderr, "tcp_usb: Packet received but no callback!\n");
+			state->state = tcp_usb_idle;
+			return;
+		}
+
+		// Fall through
+	case tcp_usb_write_response:
+		//printf("%s: tcp_usb_write_response\n", __func__);
+
+		if(state->amount_done < sizeof(*state->header))
+		{
+			ret = write(state->socket,
+					((char*)state->header) + state->amount_done,
+					sizeof(*state->header) - state->amount_done);
+			if(ret == 0 && _can_write)
+			{
+				free(state->header);
+				if(state->buffer)
+					free(state->buffer);
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d writing response header.\n", ret);
+				return;
+			}
+
+			_can_write = 0;
+			state->amount_done += ret;
+
+			if(state->amount_done < sizeof(*state->header))
+				return;
+			
+			//printf("Sent Header:");
+			//hexdump(state->header, sizeof(*state->header));
+		}
+
+		if((state->header->ep & USB_DIR_IN) != 0 && state->header->length > 0) // IN
+		{
+			ret = write(state->socket,
+					((char*)state->buffer) + (state->amount_done - sizeof(*state->header)),
+					state->header->length - (state->amount_done - sizeof(*state->header)));
+			if(ret == 0 && _can_write)
+			{
+				free(state->header);
+				if(state->buffer)
+					free(state->buffer);
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d writing response data.\n", ret);
+				return;
+			}
+
+			_can_write = 0;
+			state->amount_done += ret;
 		
-		done += ret;
-	}
+			if(state->amount_done < sizeof(*state->header) + state->header->length)
+				return;
 
-	return done;
+			//printf("Wrote:");
+			//hexdump(state->buffer, state->header->length);
+		}
+
+		free(state->header);
+		if(state->buffer)
+			free(state->buffer);
+		state->state = tcp_usb_idle;
+		break;
+
+	case tcp_usb_write_request:
+		//printf("%s: tcp_usb_write_request\n", __func__);
+
+		if(state->amount_done < sizeof(*state->header))
+		{
+			ret = write(state->socket,
+					((char*)state->header) + state->amount_done,
+					sizeof(*state->header) - state->amount_done);
+			if(ret == 0 && _can_write)
+			{
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d writing request header!\n", ret);
+				return;
+			}
+
+			_can_write = 0;
+			state->amount_done += ret;
+
+			if(state->amount_done < sizeof(*state->header))
+				return;
+
+			//printf("Sent Header:");
+			//hexdump(state->header, sizeof(*state->header));
+		}
+
+		if((state->header->ep & USB_DIR_IN) == 0 && state->header->length > 0) // OUT
+		{
+			ret = write(state->socket,
+					((char*)state->buffer) + (state->amount_done - sizeof(*state->header)),
+					state->header->length - (state->amount_done - sizeof(*state->header)));
+			if(ret == 0 && _can_write)
+			{
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d writing request data!\n", ret);
+				return;
+			}
+
+			_can_write = 0;
+			state->amount_done += ret;
+
+			if(state->amount_done < sizeof(*state->header) + state->header->length)
+				return;
+			
+			//printf("Wrote:");
+			//hexdump(state->buffer, state->header->length);
+		}
+
+		state->state = tcp_usb_read_response;
+		state->amount_done = 0;
+
+		// Fall through
+	case tcp_usb_read_response:
+		//printf("%s: tcp_usb_read_response\n", __func__);
+
+		if(state->amount_done < sizeof(*state->header))
+		{
+			ret = read(state->socket,
+					((char*)state->header) + state->amount_done,
+					sizeof(*state->header) - state->amount_done);
+			if(ret == 0 && _can_read)
+			{
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d reading response header.\n", ret);
+				return;
+			}
+
+			_can_read = 0;
+			state->amount_done += ret;
+
+			if(state->amount_done < sizeof(*state->header))
+				return;
+
+			//printf("Got Header:");
+			//hexdump(state->header, sizeof(*state->header));
+		}
+		
+		if((state->header->ep & USB_DIR_IN) != 0 && state->header->length > 0) // IN
+		{
+			ret = read(state->socket,
+					((char*)state->buffer) + (state->amount_done - sizeof(*state->header)),
+					state->header->length - (state->amount_done - sizeof(*state->header)));
+			if(ret == 0 && _can_read)
+			{
+				tcp_usb_do_closed(state);
+				return;
+			}
+			else if(ret == EWOULDBLOCK || ret == 0 || ret == -1)
+				return;
+			else if(ret < 0)
+			{
+				fprintf(stderr, "tcp_usb: Error %d reading response data.\n", ret);
+				return;
+			}
+
+			_can_read = 0;
+			state->amount_done += ret;
+		
+			if(state->amount_done < sizeof(*state->header) + state->header->length)
+				return;
+			
+			//printf("Read:");
+			//hexdump(state->buffer, state->header->length);
+		}
+
+		state->state = tcp_usb_idle;
+
+		// Transfer complete! Call callback!
+		if(state->data_callback)
+		{
+			//printf("tcp_usb: calling callback!\n");
+			state->data_callback(state, state->callback_arg, state->header, state->buffer);
+			return;
+		}
+		else
+		{
+			fprintf(stderr, "tcp_usb: Request sent but no callback!\n");
+			state->state = tcp_usb_idle;
+			return;
+		}
+		break;
+	}
 }
 
-static int write_block(int _sock, void *_data, size_t _amt)
-{
-	char *ptr = _data;
-	int ret = write(_sock, _data, _amt);
-	if(ret <= 0)
-		return ret;
-
-	int done = ret;
-
-	while(done < _amt)
-	{
-		ret = write(_sock, ptr+done, _amt-done);
-		if(ret <= 0)
-			return ret;
-
-		done += ret;
-	}
-
-	return done;
-}
-
-static void *tcp_usb_thread(void *_arg)
+static void tcp_usb_read_callback(void *_arg)
 {
 	tcp_usb_state_t *state = _arg;
+	tcp_usb_callback(state, 1, 0);
+}
 
-	while(state->closed == 0)
-	{
-		tcp_usb_header_t header;
-		int ret = read_block(state->socket, &header, sizeof(header));
-		if(ret <= 0)
-		{
-			printf("USB: Socket error %d.\n", ret);
-			state->closed = 1;
-			return NULL;
-		}
-
-		char *data = NULL;
-		if(header.length > 0)
-		{
-			data = malloc(header.length);
-			if((header.ep & USB_DIR_IN) == 0) // OUT
-			{
-				ret = read_block(state->socket, data, header.length);
-				if(ret <= 0)
-				{
-					printf("USB: Socket error %d, during data read.\n", ret);
-					state->closed = 1;
-					return NULL;
-				}
-			}
-		}
-
-		int16_t len = USB_RET_STALL;
-		if(state->callback)
-			len = state->callback(state, state->callback_arg, &header, data);
-
-		header.length = len;
-		ret = write_block(state->socket, &header, sizeof(header));
-		if(ret <= 0)
-		{
-			printf("USB: Socket error %d, during header write.\n", ret);
-			state->closed = 1;
-			return NULL;
-		}
-
-		if((header.ep & USB_DIR_IN) != 0
-				&& len > 0) // IN
-		{
-			ret = write_block(state->socket, data, len);
-			if(ret <= 0)
-			{
-				printf("USB: Socket error %d, during data write.\n", ret);
-				state->closed = 1;
-				return NULL;
-			}
-		}
-
-		if(data)
-			free(data);
-	}
-
-	state->closed = 1;
-	return NULL;
+static void tcp_usb_write_callback(void *_arg)
+{
+	tcp_usb_state_t *state = _arg;
+	tcp_usb_callback(state, 0, 1);
 }
 
 int tcp_usb_connect(tcp_usb_state_t *_state, char *_host, uint32_t _port)
@@ -173,66 +433,33 @@ int tcp_usb_connect(tcp_usb_state_t *_state, char *_host, uint32_t _port)
 	memcpy(&server_addr.sin_addr.s_addr,
 			hostname->h_addr, hostname->h_length);
 
-	if(connect(_state->socket, &server_addr, sizeof(server_addr)))
-		return -EIO;
+	int ret = connect(_state->socket, &server_addr, sizeof(server_addr));
+	if(ret < 0)
+		return ret;
 
 	_state->closed = 0;
-	qemu_thread_create(&_state->thread, tcp_usb_thread, _state);
-
+	int flags = fcntl(_state->socket, F_GETFL, 0);
+	fcntl(_state->socket, F_SETFL, flags | O_NONBLOCK);
+	qemu_set_fd_handler(_state->socket, tcp_usb_read_callback, tcp_usb_write_callback, _state);
 	return 0;
 }
 
 int tcp_usb_request(tcp_usb_state_t *_state, tcp_usb_header_t *_header, const char *_data)
 {
-	//printf("%s.\n", __func__);
+	printf("%s.\n", __func__);
 
-	int ret = write_block(_state->socket, _header, sizeof(*_header));
-	if(ret <= 0)
-	{
-		printf("%s: header write failed.\n", __func__);
-		return ret;
-	}
+	if(_state->state != tcp_usb_idle)
+		return -EBUSY;
 
-	if(_header->length > 0 && (_header->ep & USB_DIR_IN) == 0) // OUT
-	{
-		ret = write_block(_state->socket, (char*)_data, _header->length);
-		if(ret <= 0)
-		{
-			printf("%s: data write failed.\n", __func__);
-			return ret;
-		}
-	}
+	printf("%s starting request.\n", __func__);
+	
+	_state->state = tcp_usb_write_request;
+	_state->amount_done = 0;
+	_state->buffer = (char*)_data;
+	_state->header = _header;
 
-	do
-	{
-		ret = read_block(_state->socket, _header, sizeof(*_header));
-	}
-	while(ret == -1);
-
-	if(ret <= 0)
-	{
-		printf("%s: header read failed.\n", __func__);
-		return ret;
-	}
-
-	if(_header->length > 0 && (_header->ep & USB_DIR_IN) != 0) // IN
-	{
-		do
-		{
-			ret = read(_state->socket, (char*)_data, _header->length);
-		}
-		while(ret == -1);
-
-		if(ret <= 0)
-		{
-			printf("%s: data read failed.\n", __func__);
-			return ret;
-		}
-	}
-
-	//printf("%s exit.\n", __func__);
-
-	return _header->length;
+	tcp_usb_callback(_state, 0, 1);
+	return 0;
 }
 
 void tcp_usb_host_init(tcp_usb_host_state_t *_state)
@@ -285,10 +512,13 @@ int tcp_usb_accept(tcp_usb_host_state_t *_host, tcp_usb_state_t *_client)
 	if(_client->socket <= 0)
 	{
 		printf("USB: accept error %d.\n", errno);
-		return -EIO;
+		return -errno;
 	}
 
 	_client->closed = 0;
+	int flags = fcntl(_client->socket, F_GETFL, 0);
+	fcntl(_client->socket, F_SETFL, flags | O_NONBLOCK);
+	qemu_set_fd_handler(_client->socket, tcp_usb_read_callback, tcp_usb_write_callback, _client);
 	printf("USB: USB device accepted!\n");
 	return 0;
 }

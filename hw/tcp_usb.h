@@ -29,6 +29,20 @@ enum
 	tcp_usb_enumdone = 1 << 2,
 };
 
+typedef enum _tcp_usb_state_enum
+{
+	tcp_usb_idle,
+
+	// Client
+	tcp_usb_read_request,
+	tcp_usb_write_response,
+
+	// Host
+	tcp_usb_write_request,
+	tcp_usb_read_response,
+
+} tcp_usb_state_enum_t;
+
 typedef struct _tcp_usb_header
 {
 	uint8_t addr;
@@ -40,18 +54,24 @@ typedef struct _tcp_usb_header
 
 struct _tcp_usb_state;
 typedef int (*tcp_usb_callback_t)(struct _tcp_usb_state *_status, void *_arg, tcp_usb_header_t *_hdr, char *_buffer);
+typedef void (*tcp_usb_closed_t)(struct _tcp_usb_state *_state, void *_arg);
 
 typedef struct _tcp_usb_state
 {
 	int socket;
-	QemuThread thread;
 	int closed;
+
+	tcp_usb_state_enum_t state;
+	tcp_usb_header_t *header;
+	char *buffer;
+	size_t amount_done;
 	
-	tcp_usb_callback_t callback;
+	tcp_usb_closed_t closed_callback;
+	tcp_usb_callback_t data_callback;
 	void *callback_arg;
 } tcp_usb_state_t;
 
-void tcp_usb_init(tcp_usb_state_t *_state, tcp_usb_callback_t _cb, void *_arg);
+void tcp_usb_init(tcp_usb_state_t *_state, tcp_usb_callback_t _cb, tcp_usb_closed_t _closed, void *_arg);
 void tcp_usb_cleanup(tcp_usb_state_t *_state);
 
 int tcp_usb_closed(tcp_usb_state_t *_state);

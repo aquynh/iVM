@@ -723,13 +723,14 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 			if(state->server_host)
 			{
 				tcp_usb_cleanup(&state->tcp_state);
-				tcp_usb_init(&state->tcp_state, synopsys_usb_tcp_callback, state);
+				tcp_usb_init(&state->tcp_state, synopsys_usb_tcp_callback, NULL, state);
 
 				printf("Connecting to USB server at %s:%d...\n",
 						state->server_host, state->server_port);
 
-				if(tcp_usb_connect(&state->tcp_state, state->server_host, state->server_port))
-					hw_error("Failed to connect to USB server.\n");
+				int ret = tcp_usb_connect(&state->tcp_state, state->server_host, state->server_port);
+				if(ret < 0)
+					hw_error("Failed to connect to USB server (%d).\n", ret);
 			}
 
 			state->grstctl &= ~GRSTCTL_CORESOFTRESET;
@@ -883,7 +884,7 @@ static int synopsys_usb_init(SysBusDevice *dev)
 	synopsys_usb_state *state =
 		FROM_SYSBUS(synopsys_usb_state, dev);
 
-	tcp_usb_init(&state->tcp_state, NULL, NULL);
+	tcp_usb_init(&state->tcp_state, NULL, NULL, NULL);
 
     int iomemtype = cpu_register_io_memory(synopsys_usb_readfn,
                                synopsys_usb_writefn, state, DEVICE_LITTLE_ENDIAN);
