@@ -47,6 +47,8 @@
 #define GRSTCTL		0x10
 #define GINTSTS		0x14
 #define GINTMSK		0x18
+#define GRXSTSR		0x1C
+#define GRXSTSP		0x20
 #define GRXFSIZ		0x24
 #define GNPTXFSIZ	0x28
 #define GNPTXFSTS	0x2C
@@ -321,7 +323,7 @@ static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 		}
 	}
 	
-	if(_state->gintmsk & _state->gintsts)
+	if((_state->pcgcctl & 3) == 0 && _state->gintmsk & _state->gintsts)
 	{
 		printf("USB: IRQ triggered 0x%08x & 0x%08x.\n", _state->gintsts, _state->gintmsk);
 		qemu_irq_raise(_state->irq);
@@ -350,12 +352,18 @@ static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, uint8_t _ep)
 {
 	synopsys_usb_ep_state *eps = &_state->in_eps[_ep];
 	synopsys_usb_update_ep(_state, eps);
+
+	if(eps->control & USB_EPCON_ENABLE)
+		printf("USB: IN transfer queued on %d.\n", _ep);
 }
 
 static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, uint8_t _ep)
 {
 	synopsys_usb_ep_state *eps = &_state->out_eps[_ep];
 	synopsys_usb_update_ep(_state, eps);
+
+	if(eps->control & USB_EPCON_ENABLE)
+		printf("USB: OUT transfer queued on %d.\n", _ep);
 }
 
 static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_usb_header_t *_hdr, char *_buffer)
@@ -637,6 +645,10 @@ static uint32_t synopsys_usb_read(void *_arg, target_phys_addr_t _addr)
 	case DSTS:
 		return state->dsts;
 
+	case GRXSTSR:
+	case GRXSTSP:
+		return 0; // TODO: Do something about this?
+
 	case GNPTXFSTS:
 		return 0xFFFFFFFF;
 
@@ -910,7 +922,7 @@ static void synopsys_usb_initial_reset(DeviceState *dev)
 	synopsys_usb_state *state =
 		FROM_SYSBUS(synopsys_usb_state, sysbus_from_qdev(dev));
 
-	state->pcgcctl = 0;
+	state->pcgcctl = 3;
 
 	// Values from iPhone 2G.
 	state->ghwcfg1 = 0;

@@ -124,6 +124,11 @@ typedef struct s5l8900_state_s {
     CPUState *env;
     qemu_irq **irq;
 
+	uint32_t usb_ophypwr;
+	uint32_t usb_ophyclk;
+	uint32_t usb_orstcon;
+	uint32_t usb_ophytune;
+
 } s5l8900_state;
 
 s5l8900_state *s5l8900_init(void);
