@@ -415,7 +415,7 @@ static void iphone2g_init(ram_addr_t ram_size,
 	/* Also map higher ram space to default */
     cpu_register_physical_memory(RAM_HIGH_ADDR, RAM_SIZE, ramoff | IO_MEM_RAM);
 	/* Also also map to 0x0 as that's what OIB uses */
-    //cpu_register_physical_memory(0x0, RAM_SIZE, ramoff | IO_MEM_RAM);
+    cpu_register_physical_memory(0x0, RAM_SIZE, ramoff | IO_MEM_RAM);
 
 
     dinfo = drive_get(IF_PFLASH, 0, 0);
