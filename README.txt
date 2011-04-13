@@ -1,6 +1,6 @@
 how to compile:
 
-./configure --target-list=arm-softmmu --enable-sdl
+./configure --target-list=arm-softmmu --enable-sdl --enable-skinning
 make
 
 How to run:
