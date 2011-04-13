@@ -100,7 +100,7 @@ static void iphone2g_lcd_update_display(void *opaque)
 
 	(void)draw_line_table12; // Unused var.
 
-    if (!lcd || !ds_get_bits_per_pixel(lcd->ds))
+    if (!lcd || !lcd->ds || !ds_get_bits_per_pixel(lcd->ds) || !frame_base)
         return;
 
     switch (ds_get_bits_per_pixel(lcd->ds)) {
@@ -236,8 +236,6 @@ static iphone2g_lcd_s * iphone2g_lcd_init(target_phys_addr_t base)
     lcd->ds = graphic_console_init(iphone2g_lcd_update_display,
                                    iphone2g_lcd_invalidate_display,
                                    iphone2g_lcd_screen_dump, NULL, lcd);
-    qemu_console_resize(lcd->ds, LCD_WIDTH, LCD_HEIGHT);
-
     return lcd;
 }
 

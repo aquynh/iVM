@@ -5,7 +5,7 @@ make
 
 How to run:
 
-./arm-softmmu/qemu-system-arm -M iphone2g -option-rom iBoot-1.0.2.m68ap.RELEASE -option-rom iphone1-bootrom.bin -pflash nordump.bin -serial stdio
+./arm-softmmu/qemu-system-arm -M iphone2g -option-rom iBoot-1.0.2.m68ap.RELEASE -option-rom iphone1-bootrom.bin -pflash nordump.bin -serial stdio -skin ./skin/devices/iphone2g/skin.xml
 
 How do i contribute:
 

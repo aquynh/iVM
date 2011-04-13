@@ -28,6 +28,14 @@
 #include "console.h"
 #include "qjson.h"
 
+#ifdef CONFIG_SKINNING
+QEMUPutMouseEntry *original_qemu_add_mouse_event_handler(QEMUPutMouseEvent *func,
+                                                         void *opaque, int absolute,
+                                                         const char *name);
+#undef qemu_add_mouse_event_handler
+#define qemu_add_mouse_event_handler original_qemu_add_mouse_event_handler
+#endif
+
 static QEMUPutKBDEvent *qemu_put_kbd_event;
 static void *qemu_put_kbd_event_opaque;
 static QTAILQ_HEAD(, QEMUPutLEDEntry) led_handlers = QTAILQ_HEAD_INITIALIZER(led_handlers);

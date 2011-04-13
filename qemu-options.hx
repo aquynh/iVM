@@ -769,6 +769,16 @@ STEXI
 Rotate graphical output 90 deg left (only PXA LCD).
 ETEXI
 
+DEF("landscape", 0, QEMU_OPTION_landscape,
+    "-landscape       rotate graphical output 90 deg right\n",
+    QEMU_ARCH_ALL)
+STEXI
+@item -portrait
+@findex -portrait
+Rotate graphical output 90 deg right
+ETEXI
+
+
 DEF("vga", HAS_ARG, QEMU_OPTION_vga,
     "-vga [std|cirrus|vmware|qxl|xenfb|none]\n"
     "                select video card type\n", QEMU_ARCH_ALL)
@@ -807,6 +817,24 @@ STEXI
 @findex -full-screen
 Start in full screen.
 ETEXI
+
+#if defined(CONFIG_SKINNING)
+DEF("skin", HAS_ARG, QEMU_OPTION_skin,
+    "-skin file      Skin qemu using provided skin configuration file\n", QEMU_ARCH_ALL)
+STEXI
+@item -skin @var{file}
+Skin qemu using definitions from @var{file}
+ETEXI
+#endif
+
+#if defined(CONFIG_SKINNING)
+DEF("rctport", HAS_ARG, QEMU_OPTION_rctport,
+    "-rctport port   Allow remote control of the skin through specified port\n", QEMU_ARCH_ALL)
+STEXI
+@item -rctport @var{d}
+Allow remote control of the skin through port @var{d}
+ETEXI
+#endif
 
 DEF("g", 1, QEMU_OPTION_g ,
     "-g WxH[xDEPTH]  Set the initial graphical resolution and depth\n",

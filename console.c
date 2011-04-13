@@ -32,6 +32,21 @@
 #define QEMU_RGBA(r, g, b, a) (((a) << 24) | ((r) << 16) | ((g) << 8) | (b))
 #define QEMU_RGB(r, g, b) QEMU_RGBA(r, g, b, 0xff)
 
+#ifdef CONFIG_SKINNING
+// Skinning overwrites these functions to put the skin in between
+DisplayState *qemu_graphic_console_init(vga_hw_update_ptr update,
+                                   vga_hw_invalidate_ptr invalidate,
+                                   vga_hw_screen_dump_ptr screen_dump,
+                                   vga_hw_text_update_ptr text_update,
+                                   void *opaque);
+#undef graphic_console_init
+#define graphic_console_init qemu_graphic_console_init
+
+void original_qemu_console_resize(DisplayState *ds, int width, int height);
+#undef qemu_console_resize
+#define qemu_console_resize original_qemu_console_resize
+#endif
+
 typedef struct TextAttributes {
     uint8_t fgcol:4;
     uint8_t bgcol:4;
@@ -227,7 +242,7 @@ static unsigned int vga_get_color(DisplayState *ds, unsigned int rgba)
     return color;
 }
 
-static void vga_fill_rect (DisplayState *ds,
+void vga_fill_rect (DisplayState *ds,
                            int posx, int posy, int width, int height, uint32_t color)
 {
     uint8_t *d, *d1;

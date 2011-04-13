@@ -1,0 +1,14 @@
+<root>
+    <portrait>
+        <skin width="392" height="732"/>
+        <bgcolor red="255" blue="255" green="255"/>
+        <background image="iphone2g-portrait.png" posx="0" posy="0"/>
+        <screen width="320" height="480" posx="36" posy="120"/>
+    </portrait>
+    <landscape>
+        <skin width="723" height="392"/>
+        <bgcolor red="255" blue="255" green="255"/>
+        <background image="iphone2g-landscape.png" posx="0" posy="0"/>
+        <screen width="320" height="480" posx="282" posy="36"/>
+    </landscape>
+</root>

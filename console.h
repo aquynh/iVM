@@ -163,7 +163,10 @@ struct DisplayChangeListener {
     void (*dpy_fill)(struct DisplayState *s, int x, int y,
                      int w, int h, uint32_t c);
     void (*dpy_text_cursor)(struct DisplayState *s, int x, int y);
-
+#ifdef CONFIG_SKINNING
+    void (*dpy_enablezoom)(struct DisplayState *s, int width, int height);
+    void (*dpy_getresolution)(int *width, int *height);
+#endif
     struct DisplayChangeListener *next;
 };
 
@@ -298,6 +301,26 @@ static inline void dpy_cursor(struct DisplayState *s, int x, int y) {
     }
 }
 
+#ifdef CONFIG_SKINNING
+static inline void dpy_enablezoom(struct DisplayState *s, int width, int height)
+{
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_enablezoom) dcl->dpy_enablezoom(s, width, height);
+        dcl = dcl->next;
+    }
+}
+
+static inline void dpy_getresolution(struct DisplayState *s, int *width, int *height)
+{
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_getresolution) dcl->dpy_getresolution(width, height);
+        dcl = dcl->next;
+    }
+}
+#endif
+
 static inline int ds_get_linesize(DisplayState *ds)
 {
     return ds->surface->linesize;
@@ -361,6 +384,9 @@ void console_color_init(DisplayState *ds);
 void qemu_console_resize(DisplayState *ds, int width, int height);
 void qemu_console_copy(DisplayState *ds, int src_x, int src_y,
                        int dst_x, int dst_y, int w, int h);
+
+void vga_fill_rect (DisplayState *ds,
+                           int posx, int posy, int width, int height, uint32_t color);
 
 /* sdl.c */
 void sdl_display_init(DisplayState *ds, int full_screen, int no_frame);

@@ -215,7 +215,7 @@ int fd_bootchk = 1;
 int no_reboot = 0;
 int no_shutdown = 0;
 int cursor_hide = 1;
-int graphic_rotate = 0;
+int graphic_rotate = 1;
 uint8_t irq0override = 1;
 const char *watchdog;
 QEMUOptionRom option_rom[MAX_OPTION_ROMS];
@@ -250,6 +250,12 @@ uint8_t qemu_uuid[16];
 
 static QEMUBootSetHandler *boot_set_handler;
 static void *boot_set_opaque;
+
+#ifdef CONFIG_SKINNING
+int skinning_init(char* skin_file, int portrait, int rctport);
+const char *skin_file = NULL;
+int rctport = 0;
+#endif /* CONFIG_SKINNING */
 
 static NotifierList exit_notifiers =
     NOTIFIER_LIST_INITIALIZER(exit_notifiers);
@@ -2197,6 +2203,9 @@ int main(int argc, char **argv, char **envp)
             case QEMU_OPTION_portrait:
                 graphic_rotate = 1;
                 break;
+						case QEMU_OPTION_landscape:
+								graphic_rotate = 0;
+								break;
             case QEMU_OPTION_kernel:
                 kernel_filename = optarg;
                 break;
@@ -2551,6 +2560,21 @@ int main(int argc, char **argv, char **envp)
             case QEMU_OPTION_full_screen:
                 full_screen = 1;
                 break;
+#ifdef CONFIG_SKINNING
+            case QEMU_OPTION_skin:
+                skin_file = optarg;
+                printf("skin_file: %s\n", skin_file);
+                break;
+            case QEMU_OPTION_rctport:
+            {
+                const char *p;
+                p = optarg;
+                rctport = strtol(p, (char **)&p, 10);
+                if (p == optarg)
+                    printf("Bad argument to rctport\n");
+                break;
+            }
+#endif
 #ifdef CONFIG_SDL
             case QEMU_OPTION_no_frame:
                 no_frame = 1;
@@ -2816,6 +2840,13 @@ int main(int argc, char **argv, char **envp)
     if (!st_init(trace_file)) {
         fprintf(stderr, "warning: unable to initialize simple trace backend\n");
     }
+
+#ifdef CONFIG_SKINNING
+    if( skin_file && skinning_init((char*)skin_file, graphic_rotate, rctport) ) {
+        fprintf( stderr, "Skin could not be initialised\n");
+        exit(1);
+    }
+#endif
 
     /* If no data_dir is specified then try to find it relative to the
        executable path.  */
