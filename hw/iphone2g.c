@@ -42,6 +42,51 @@ struct iphone2g_s {
     struct s5l8900_state *cpu;
 };
 
+extern s5l8900_gpio_s s5l8900_gpio_state[32];
+
+struct  keymap {
+    int column;
+    int row;
+};
+
+static struct keymap map[0xE0] = {
+    [0 ... 0xDF] = { -1, -1 },
+    [0x1e] = {0,0}, /* a */
+    [0x30] = {0,1}, /* b */
+    [0x2e] = {0,2}, /* c */
+    [0x20] = {0,3}, /* d */
+    [0x12] = {0,4}, /* e */
+    [0x21] = {0,5}, /* f */
+    [0x22] = {1,0}, /* g */
+    [0x23] = {1,1}, /* h */
+    [0x17] = {1,2}, /* i */
+    [0x24] = {1,3}, /* j */
+    [0x25] = {1,4}, /* k */
+    [0x26] = {1,5}, /* l */
+    [0x32] = {2,0}, /* m */
+    [0x31] = {2,1}, /* n */
+    [0x18] = {2,2}, /* o */
+    [0x19] = {2,3}, /* p */
+    [0x10] = {2,4}, /* q */
+    [0x13] = {2,5}, /* r */
+    [0x1f] = {3,0}, /* s */
+    [0x14] = {3,1}, /* t */
+    [0x16] = {3,2}, /* u */
+    [0x2f] = {3,3}, /* v */
+    [0x11] = {3,4}, /* w */
+    [0x2d] = {3,5}, /* x */
+    [0x15] = {4,2}, /* y */
+    [0x2c] = {4,3}, /* z */
+    [0xc7] = {5,0}, /* Home */
+    [0x2a] = {5,1}, /* shift */
+    [0x39] = {5,2}, /* space */
+    [0x39] = {5,3}, /* space */
+    [0x1c] = {5,5}, /*  enter */
+    [0xc8] = {6,0}, /* up */
+    [0xd0] = {6,1}, /* down */
+    [0xcb] = {6,2}, /* left */
+    [0xcd] = {6,3}, /* right */
+};
 /**************************************************************************/
 /* LCD Module */
 /**************************************************************************/
@@ -208,7 +253,7 @@ static void lcd_write(void *opaque, target_phys_addr_t offset, uint32_t value)
 	if(offset == 0x78) // Window 2 framebuffer. Doesn't detect active window yet!
 	{
 		// Framebuffer Address
-		fprintf(stderr, "%s: Found framebuffer at 0x%08x.\n", __func__, value);
+		//fprintf(stderr, "%s: Found framebuffer at 0x%08x.\n", __func__, value);
 		frame_base = value;
 	}
 }
@@ -367,6 +412,51 @@ static void iphone2g_aes_init(target_phys_addr_t base)
 
 }
 
+typedef struct iphone2gKeyState_s {
+    struct  keymap *map;
+} iphone2gKeyState_s;
+
+
+static void iphone2g_keyboard_event (iphone2gKeyState_s *kp, int keycode)
+{
+    //fprintf(stderr, "Got keypad event 0x%02x\n", keycode);
+
+       switch(keycode) {
+        	case 0x36:
+            	s5l8900_gpio_state[0].gpio_state |= 1 << (BUTTONS_HOME & 0xf);
+                break;
+            case 0xb6:
+                s5l8900_gpio_state[0].gpio_state &= ~(1 << (BUTTONS_HOME & 0xf));
+                break;
+			case 0x01:
+				s5l8900_gpio_state[0].gpio_state |= 1 << (BUTTONS_HOLD & 0xf);
+                break;
+            case 0x81:
+                s5l8900_gpio_state[0].gpio_state &= ~(1 << (BUTTONS_HOLD & 0xf));
+                break;
+			case 0x51:
+            	s5l8900_gpio_state[0].gpio_state &= ~(1 << (BUTTONS_VOLUP & 0xf));
+                break;
+			case 0xd1:
+				s5l8900_gpio_state[0].gpio_state |= 1 << (BUTTONS_VOLUP & 0xf);
+				break;
+			case 0x53:
+				s5l8900_gpio_state[0].gpio_state &= ~(1 << (BUTTONS_VOLDOWN & 0xf));
+                break;
+			case 0xd3:
+				s5l8900_gpio_state[0].gpio_state |= 1 << (BUTTONS_VOLDOWN & 0xf);
+				break;
+       }
+
+}
+
+static void iphone2g_register_keyboard(void)
+{
+    iphone2gKeyState_s *kp = (iphone2gKeyState_s *) qemu_mallocz(sizeof(iphone2gKeyState_s));
+    kp->map = map;
+    qemu_add_kbd_event_handler((QEMUPutKBDEvent *) iphone2g_keyboard_event, kp);
+}
+
 static void iphone2g_init(ram_addr_t ram_size,
                 const char *boot_device,
                 const char *kernel_filename, const char *kernel_cmdline,
@@ -436,6 +526,8 @@ static void iphone2g_init(ram_addr_t ram_size,
 	/* Init AES hardware */
 	iphone2g_aes_init(AES_BASE_ADDR);
 	
+    /* Button emulation */
+    iphone2g_register_keyboard();
 
 	cpu->env->regs[15] = IBOOT_BASE_ADDR;
 }

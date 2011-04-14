@@ -5,9 +5,31 @@
 
 // Devices
 
+// GPIO
+#define S5L8900_GPIO_BASE              0x3E400000
+#define S5L8900_IRQ_GPIO0              0x21
+#define S5L8900_IRQ_GPIO1              0x20
+#define S5L8900_IRQ_GPIO2              0x1f
+#define S5L8900_IRQ_GPIO3              0x03
+#define S5L8900_IRQ_GPIO4              0x02
+#define S5L8900_IRQ_GPIO5              0x01
+#define S5L8900_IRQ_GPIO6              0x00
+#define S5L8900_GPIO_INTLEVEL          0x80
+#define S5L8900_GPIO_INTSTAT           0xA0
+#define S5L8900_GPIO_INTEN             0xC0
+#define S5L8900_GPIO_INTTYPE           0xE0
+#define S5L8900_GPIO_FSEL              0x320
+
+#define BUTTONS_HOLD 0x1605
+#define BUTTONS_HOME 0x1600
+#define BUTTONS_VOLUP 0x1601
+#define BUTTONS_VOLDOWN 0x1602
+
+
 // PMU
 #define PCF50633_ADDR_GET 0xe6
 #define PCF50633_ADDR_SET 0xe7
+#define BUTTONS_IIC_STATE 0x4B
 
 // MIU
 #define MIU_BASE 0x39A00000 
@@ -119,6 +141,14 @@ extern FILE *g_debug_fp;
             fprintf(g_debug_fp, msg);                                   \
         }                                                               \
     } while (0)
+
+typedef struct s5l8900_gpio_s
+{
+    uint32_t gpio_state;
+    uint32_t int_state;
+
+} s5l8900_gpio_s;
+
 
 typedef struct s5l8900_state_s {
     CPUState *env;

@@ -59,6 +59,8 @@ typedef struct S5L8900I2CState {
     uint8_t line_ctrl;
 	uint32_t iicreg20;
 
+	uint8_t active;
+
     uint8_t ibmr;
     uint8_t data;
 } S5L8900I2CState;
@@ -78,7 +80,6 @@ static void s5l8900_i2c_update(S5L8900I2CState *s)
 static int s5l8900_i2c_receive(S5L8900I2CState *s)
 {
     int r;
-	s->iicreg20 = 0x2000;
     r = i2c_recv(s->bus);
     s5l8900_i2c_update(s);
     return r;
@@ -87,9 +88,9 @@ static int s5l8900_i2c_receive(S5L8900I2CState *s)
 static int s5l8900_i2c_send(S5L8900I2CState *s, uint8_t data)
 {
     if (!(s->status & S5L8900_IICSTAT_LASTBIT)) {
-        /*s->status |= 1 << 7;*/
-    	s->iicreg20 = 0x100;
+        s->status |= S5L8900_IICCON_ACKEN;
         s->data = data;
+		s->iicreg20 |= 0x100;
         i2c_send(s->bus, s->data);
     }
     s5l8900_i2c_update(s);
@@ -112,19 +113,13 @@ static uint32_t s5l8900_i2c_read(void *opaque, target_phys_addr_t offset)
     case I2CADD:
         return s->address;
     case I2CDS:
+		s->iicreg20 |= 0x100;
         s->data = s5l8900_i2c_receive(s);
-		/* XXX: Need to fix */
-		//fprintf(stderr, "%s: returning I2CDS 0x%08x\n", __func__, s->data);
-        return 0x0;//0x20; //s->data;
+        return s->data;
     case I2CLC:
         return s->line_ctrl;
     case IICREG20:
-		{
-			uint32_t tmp_reg20 = s->iicreg20;
-			s->iicreg20 &= ~0x100;
-			s->iicreg20 &= ~0x2000;
-			return tmp_reg20;
-		}
+		return s->iicreg20;
     default:
         hw_error("s5l8900.i2c: bad read offset 0x" TARGET_FMT_plx "\n",
                  offset);
@@ -141,22 +136,32 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
 
     //fprintf(stderr, "s5l8900_i2c_write: offset = 0x%08x, val = 0x%08x\n", offset, value);
 
-    //qemu_irq_lower(s->irq);
+    qemu_irq_lower(s->irq);
 
     switch (offset) {
     case I2CCON:
-        s->control = value & 0xff;
-		if(value & 7)
+		if(value & ~(S5L8900_IICCON_ACKEN))
 			s->iicreg20 = 0x100;
+		/*
 		if((value & 0x10) && (s->status == 0x90)) 
 			s->iicreg20 = 0x2000;
-
+		*/
+		s->control = value & 0xff;
         if (value & S5L8900_IICCON_IRQEN)
             s5l8900_i2c_update(s);
         break;
 
     case I2CSTAT:
-        s->status = value & 0xff;
+		/* We have to make sure we don't miss an end transfer */
+		if((!s->active) && ((s->status >> 6) != ((value >> 6)))) {
+        	s->status = value & 0xff;
+		/* If they toggle the tx bit then we have to force an end transfer before mode update */
+		} else if((s->active) && ((s->status >> 6) != ((value >> 6)))) {
+                  	i2c_end_transfer(s->bus);
+                    s->active=0;
+                    s->status = value & 0xff;
+                    s->status |= S5L8900_IICSTAT_TXRXEN;
+		}
         mode = (s->status >> 6) & 0x3;
         if (value & S5L8900_IICSTAT_TXRXEN) {
             /* IIC-bus data output enable/disable bit */
@@ -168,26 +173,30 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
                 s->data = s5l8900_i2c_receive(s);
                 break;
             case MR_MODE:
-                if (value & (1 << 5)) {
+                if (value & S5L8900_IICSTAT_START) {
                     /* START condition */
                     s->status &= ~S5L8900_IICSTAT_LASTBIT;
 
+                    s->iicreg20 |= 0x100;
+					s->active = 1;
                     i2c_start_transfer(s->bus, s->data >> 1, s->data & 1);
                 } else {
                     i2c_end_transfer(s->bus);
+					s->active = 0;
                     s->status |= S5L8900_IICSTAT_TXRXEN;
                 }
                 break;
             case MT_MODE:
-				if (value & (1 << 5)) {
+				if (value & S5L8900_IICSTAT_START) {
                     /* START condition */
                     s->status &= ~S5L8900_IICSTAT_LASTBIT;
 						
-					s->iicreg20 |= 0x100;	
-					//fprintf(stderr, "%s: Starting transfer to addr 0x%08x\n", __func__, s->data);
-                    i2c_start_transfer(s->bus, s->data, s->data & 1);
+                    s->iicreg20 |= 0x100;
+					s->active = 1;
+                    i2c_start_transfer(s->bus, s->data >> 1, s->data & 1);
                 } else {
                     i2c_end_transfer(s->bus);
+					s->active = 0;
                     s->status |= S5L8900_IICSTAT_TXRXEN;
                 }
                 break;
@@ -211,7 +220,7 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
         break;
 
 	case IICREG20:
-		//s->iicreg20 = value;
+		s->iicreg20 &= ~value;
 		break;
     default:
         hw_error("s5l8900.i2c: bad write offset 0x" TARGET_FMT_plx "\n",
