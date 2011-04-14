@@ -45,6 +45,8 @@ typedef struct s5l8900_timer_s
 
 } s5l8900_timer_s;
 
+struct s5l8900_gpio_s s5l8900_gpio_state[32];
+
 static uint32_t s5l8900_timer1_read(void *opaque, target_phys_addr_t addr)
 {
     s5l8900_timer_s *s = (struct s5l8900_timer_s *) opaque;
@@ -229,6 +231,47 @@ static void s5l8900_chipid_init(target_phys_addr_t base)
 
 }
 
+static void s5l8900_gpio_write(void *opaque, target_phys_addr_t addr, uint32_t value) 
+{
+	fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __func__, addr, value);
+}
+
+static uint32_t s5l8900_gpio_read(void *opaque, target_phys_addr_t addr)
+{
+	switch(addr) {
+		case 0x2c4:
+			return s5l8900_gpio_state[0].gpio_state;
+	}
+	fprintf(stderr, "%s: offset 0x%08x\n", __func__, addr);
+    return 0;
+}
+
+static CPUReadMemoryFunc *s5l8900_gpio_readfn[] = {
+    s5l8900_gpio_read,
+    s5l8900_gpio_read,
+    s5l8900_gpio_read,
+};
+
+static CPUWriteMemoryFunc *s5l8900_gpio_writefn[] = {
+    s5l8900_gpio_write,
+    s5l8900_gpio_write,
+    s5l8900_gpio_write,
+};
+
+static void s5l8900_gpio_init(target_phys_addr_t base)
+{
+
+    int iomemtype = cpu_register_io_memory(s5l8900_gpio_readfn,
+                                           s5l8900_gpio_writefn, NULL, DEVICE_LITTLE_ENDIAN);
+    cpu_register_physical_memory(base, 0x3FF, iomemtype);
+
+	/* Vol gpios are inverted */
+    s5l8900_gpio_state[0].gpio_state |= (1 << (BUTTONS_VOLUP & 0xf));
+    s5l8900_gpio_state[0].gpio_state |= (1 << (BUTTONS_VOLDOWN & 0xf));
+
+
+}
+
 static inline qemu_irq s5l8900_get_irq(struct s5l8900_state_s *s, int n)
 {
     return s->irq[n / S5L8900_VIC_SIZE][n % S5L8900_VIC_SIZE];
@@ -358,26 +401,27 @@ s5l8900_state *s5l8900_init(void)
     /* Sytem Timer */
 	s5l8900_timer_init(S5L8900_TIMER1);
 
+	/* GPIO */
+	s5l8900_gpio_init(S5L8900_GPIO_BASE);
+
 	/* Uart */
     s5l8900_uart_init(S5L8900_UART0_BASE, 0, 256, s5l8900_get_irq(s, S5L8900_IRQ_UART0), serial_hds[0]);
 
 	/* Uart + Radio */
     s5l8900_uart_init(S5L8900_UART1_BASE, 0, 256, s5l8900_get_irq(s, S5L8900_IRQ_UART0 /* XXX: fix irq for radio */), NULL);
 
-    /* I2C */
+    /* I2C 0 */
     dev = sysbus_create_simple("s5l8900.i2c", S5l8900_I2C0_BASE,
                                s5l8900_get_irq(s, S5L8900_IRQ_I2C_0));
 	i2c = (i2c_bus *)qdev_get_child_bus(dev, "i2c");
 
+    /* PWU  */
+    pcf50633_init(i2c, PCF50633_ADDR_GET >> 1);
+
+	/* I2C 1 */
     dev = sysbus_create_simple("s5l8900.i2c", S5l8900_I2C1_BASE,
                                s5l8900_get_irq(s, S5L8900_IRQ_I2C_1));
     i2c = (i2c_bus *)qdev_get_child_bus(dev, "i2c");
-
-
-	/* PWU */
-	pcf50633_init(i2c, PCF50633_ADDR_GET);
-    pcf50633_init(i2c, PCF50633_ADDR_SET);
-
 
 	/* SPI */
 	set_spi_base(0);
