@@ -579,7 +579,7 @@ static int skin_load_file(SkinScreen* skin, char *file)
                 done = feof(skin_xml);
                 if (!XML_Parse(parser, buffer, strlen(buffer), done)) {
                     fprintf(stderr, "Parse error at line %d: %s\n",
-                        XML_GetCurrentLineNumber(parser),
+                        (int)XML_GetCurrentLineNumber(parser),
                         XML_ErrorString(XML_GetErrorCode(parser)));
                     // Continue anyway
                 }
