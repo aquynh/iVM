@@ -2563,7 +2563,6 @@ int main(int argc, char **argv, char **envp)
 #ifdef CONFIG_SKINNING
             case QEMU_OPTION_skin:
                 skin_file = optarg;
-                printf("skin_file: %s\n", skin_file);
                 break;
             case QEMU_OPTION_rctport:
             {

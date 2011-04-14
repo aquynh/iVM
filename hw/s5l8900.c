@@ -233,16 +233,18 @@ static void s5l8900_chipid_init(target_phys_addr_t base)
 
 static void s5l8900_gpio_write(void *opaque, target_phys_addr_t addr, uint32_t value) 
 {
-	fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __func__, addr, value);
+	//fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __func__, addr, value);
 }
 
 static uint32_t s5l8900_gpio_read(void *opaque, target_phys_addr_t addr)
 {
+    //fprintf(stderr, "%s: offset 0x%08x\n", __func__, addr);
+
 	switch(addr) {
 		case 0x2c4:
 			return s5l8900_gpio_state[0].gpio_state;
 	}
-	fprintf(stderr, "%s: offset 0x%08x\n", __func__, addr);
+
     return 0;
 }
 

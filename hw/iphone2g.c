@@ -294,7 +294,8 @@ static uint32_t aes_read(void *opaque, target_phys_addr_t offset)
 		case IPHONE2G_AES_STATUS:
 			return aesop->status;
 	  default:
-            fprintf(stderr, "%s: UNMAPPED AES_ADDR @ offset 0x%08x\n", __FUNCTION__, offset);
+            //fprintf(stderr, "%s: UNMAPPED AES_ADDR @ offset 0x%08x\n", __FUNCTION__, offset);
+			break;
 	}
 
     return 0;
@@ -329,24 +330,26 @@ static void aes_write(void *opaque, target_phys_addr_t offset,
 	 struct iphone2g_aes_s *aesop = (struct iphone2g_aes_s *)opaque;
 	 uint8_t inbuf[0x1000];
 	 uint8_t *buf;
-	 uint32_t ctr;
+	 //uint32_t ctr;
 
 	 //fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
 
 	switch(offset) {
 			case IPHONE2G_AES_GO:
-				fprintf(stderr, "%s: Received AES_GO lets do it\n", __FUNCTION__);
+				//fprintf(stderr, "%s: Received AES_GO lets do it\n", __FUNCTION__);
 				memset(aesop->ivec, 0, 16);
 
 				memset(inbuf, 0, sizeof(inbuf));
-                fprintf(stderr, "%s: AES_DECRYPT INADDR 0x%08x INSIZE 0x%08x OUTADDR 0x%08x\n", __FUNCTION__, aesop->inaddr,  aesop->insize, aesop->outaddr);
+                //fprintf(stderr, "%s: AES_DECRYPT INADDR 0x%08x INSIZE 0x%08x OUTADDR 0x%08x\n", __FUNCTION__, aesop->inaddr,  aesop->insize, aesop->outaddr);
 
 				cpu_physical_memory_read((aesop->inaddr - 0x80000000), (uint8_t *)inbuf, aesop->insize);
+				/*
 				for( ctr = 0; ctr < aesop->insize; ctr++ )
 				{
 					fprintf(stderr, "%02x ", inbuf[ ctr ] );
 				}
 				fprintf(stderr, "\n" ); 
+				*/
 				buf = (uint8_t *) malloc(aesop->insize);
 				memset(buf, 0, aesop->insize);
 				if(aesop->insize >= 0x20)
@@ -355,11 +358,14 @@ static void aes_write(void *opaque, target_phys_addr_t offset,
 					ccount++;
 				} else {
 					//AES_cbc_encrypt(inbuf, buf, aesop->insize, &aesop->decryptKey, aesop->ivec, AES_DECRYPT);
+					/*
 					fprintf(stderr, "decrypting: ");
                 	for( ctr = 0; ctr < aesop->insize; ctr++ )
                 	{
                     	fprintf(stderr, "%02x ", buf[ ctr ] );
                 	}
+					*/
+					;
 				}
 				cpu_physical_memory_write((aesop->outaddr - 0x80000000), buf, aesop->insize);
 				free(buf);
@@ -383,7 +389,8 @@ static void aes_write(void *opaque, target_phys_addr_t offset,
 			case IPHONE2G_AES_IV ... ((IPHONE2G_AES_IV + IPHONE2G_AES_IVSIZE) -1 ):
 				break;
 		default:
-			fprintf(stderr, "%s: UNMAPPED AES_ADDR @ offset 0x%08x - 0x%08x\n", __FUNCTION__, offset, value);
+			//fprintf(stderr, "%s: UNMAPPED AES_ADDR @ offset 0x%08x - 0x%08x\n", __FUNCTION__, offset, value);
+			break;
 	}
 
 }

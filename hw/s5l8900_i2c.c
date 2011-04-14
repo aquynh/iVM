@@ -119,7 +119,12 @@ static uint32_t s5l8900_i2c_read(void *opaque, target_phys_addr_t offset)
     case I2CLC:
         return s->line_ctrl;
     case IICREG20:
-		return s->iicreg20;
+		{
+     		uint32_t tmp_reg20 = s->iicreg20; 
+      		s->iicreg20 &= ~0x100; 
+      		s->iicreg20 &= ~0x2000; 
+			return tmp_reg20; 
+		}
     default:
         hw_error("s5l8900.i2c: bad read offset 0x" TARGET_FMT_plx "\n",
                  offset);
@@ -140,12 +145,12 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
 
     switch (offset) {
     case I2CCON:
-		if(value & ~(S5L8900_IICCON_ACKEN))
-			s->iicreg20 = 0x100;
-		/*
-		if((value & 0x10) && (s->status == 0x90)) 
-			s->iicreg20 = 0x2000;
-		*/
+		if(value & ~(S5L8900_IICCON_ACKEN)) {
+			s->iicreg20 |= 0x100;
+		}
+		if((value & 0x10) && (s->status == 0x90))  {
+			s->iicreg20 |= 0x2000;
+		}
 		s->control = value & 0xff;
         if (value & S5L8900_IICCON_IRQEN)
             s5l8900_i2c_update(s);
@@ -161,6 +166,7 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
                     s->active=0;
                     s->status = value & 0xff;
                     s->status |= S5L8900_IICSTAT_TXRXEN;
+					break;
 		}
         mode = (s->status >> 6) & 0x3;
         if (value & S5L8900_IICSTAT_TXRXEN) {
@@ -179,7 +185,7 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
 
                     s->iicreg20 |= 0x100;
 					s->active = 1;
-                    i2c_start_transfer(s->bus, s->data >> 1, s->data & 1);
+                    i2c_start_transfer(s->bus, s->data >> 1, 1);
                 } else {
                     i2c_end_transfer(s->bus);
 					s->active = 0;
@@ -193,7 +199,7 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
 						
                     s->iicreg20 |= 0x100;
 					s->active = 1;
-                    i2c_start_transfer(s->bus, s->data >> 1, s->data & 1);
+                    i2c_start_transfer(s->bus, s->data >> 1, 0);
                 } else {
                     i2c_end_transfer(s->bus);
 					s->active = 0;
@@ -220,7 +226,7 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
         break;
 
 	case IICREG20:
-		s->iicreg20 &= ~value;
+		//s->iicreg20 &= ~value;
 		break;
     default:
         hw_error("s5l8900.i2c: bad write offset 0x" TARGET_FMT_plx "\n",

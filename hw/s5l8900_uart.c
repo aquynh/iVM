@@ -345,7 +345,7 @@ DeviceState *s5l8900_uart_init(target_phys_addr_t base, int instance,
     char str[] = "s5l8900.uart.00";
 
     if (!chr) {
-		fprintf(stderr, "openning char device");
+		fprintf(stderr, "openning char device\n");
         snprintf(str, strlen(str) + 1, "s5l8900.uart.%02d", instance % 100);
         chr = qemu_chr_open(str, "null", NULL);
     }
