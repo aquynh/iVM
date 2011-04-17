@@ -408,6 +408,13 @@ static void s5l8900_usb_phy_init(s5l8900_state *_state)
     cpu_register_physical_memory(S5L8900_USB_PHY_BASE, 0x40, iomemtype);
 }
 
+static uint32_t s5l8900_usb_hwcfg[] = {
+	0,
+	0x7a8f60d0,
+	0x082000e8,
+	0x01f08024
+};
+
 s5l8900_state *s5l8900_init(void)
 {
 
@@ -494,10 +501,9 @@ s5l8900_state *s5l8900_init(void)
     sysbus_create_simple("s5l8900.spi",
                          S5L8900_SPI2_BASE,
                          s5l8900_get_irq(s, S5L8900_SPI2_IRQ));
-
     /* USB-OTG */
 	register_synopsys_usb(S5L8900_USB_OTG_BASE,
-			s5l8900_get_irq(s, S5L8900_IRQ_OTG));
+			s5l8900_get_irq(s, S5L8900_IRQ_OTG), s5l8900_usb_hwcfg);
 	s5l8900_usb_phy_init(s);
 
 	return s;

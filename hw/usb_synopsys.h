@@ -21,6 +21,6 @@
  */
 
 struct SysBusDeviceInfo;
-void register_synopsys_usb(target_phys_addr_t _addr, qemu_irq _irq);
+void register_synopsys_usb(target_phys_addr_t _addr, qemu_irq _irq, uint32_t _hwcfg[4]);
 
 #endif //HW_USB_SYNOPSYS

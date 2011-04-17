@@ -767,6 +767,7 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 	switch(_addr)
 	{
 	case PCGCCTL:
+		state->pcgcctl = _val;
 		return;
 
 	case GOTGCTL:
@@ -922,13 +923,13 @@ static void synopsys_usb_initial_reset(DeviceState *dev)
 	synopsys_usb_state *state =
 		FROM_SYSBUS(synopsys_usb_state, sysbus_from_qdev(dev));
 
-	state->pcgcctl = 3;
+	printf("USB: cfg = 0x%08x, 0x%08x, 0x%08x, 0x%08x.\n",
+			state->ghwcfg1,
+			state->ghwcfg2,
+			state->ghwcfg3,
+			state->ghwcfg4);
 
-	// Values from iPhone 2G.
-	state->ghwcfg1 = 0;
-	state->ghwcfg2 = 0x7a8f60d0;
-	state->ghwcfg3 = 0x082000e8;
-	state->ghwcfg4 = 0x01f08024;
+	state->pcgcctl = 3;
 
 	state->gahbcfg = 0;
 	state->gusbcfg = 0;
@@ -1003,6 +1004,10 @@ static SysBusDeviceInfo synopsys_usb_info = {
     .qdev.props = (Property[]) {
 		DEFINE_PROP_STRING("host", synopsys_usb_state, server_host),
 		DEFINE_PROP_UINT32("port", synopsys_usb_state, server_port, 7642),
+		DEFINE_PROP_HEX32("hwcfg1", synopsys_usb_state, ghwcfg1, 0),
+		DEFINE_PROP_HEX32("hwcfg2", synopsys_usb_state, ghwcfg2, 0),
+		DEFINE_PROP_HEX32("hwcfg3", synopsys_usb_state, ghwcfg3, 0),
+		DEFINE_PROP_HEX32("hwcfg4", synopsys_usb_state, ghwcfg4, 0),
         DEFINE_PROP_END_OF_LIST(),
     }
 };
@@ -1014,9 +1019,17 @@ static void synopsys_usb_register(void)
 device_init(synopsys_usb_register);
 
 // Helper for adding to a machine
-void register_synopsys_usb(target_phys_addr_t _addr, qemu_irq _irq)
+void register_synopsys_usb(target_phys_addr_t _addr, qemu_irq _irq, uint32_t _hwcfg[4])
 {
     DeviceState *dev = qdev_create(NULL, DEVICE_NAME);
+	synopsys_usb_state *state = DO_UPCAST(synopsys_usb_state,
+			busdev, sysbus_from_qdev(dev));
+
+	state->ghwcfg1 = _hwcfg[0];
+	state->ghwcfg2 = _hwcfg[1];
+	state->ghwcfg3 = _hwcfg[2];
+	state->ghwcfg4 = _hwcfg[3];
+
 	qdev_init_nofail(dev);
 
 	SysBusDevice *sdev = sysbus_from_qdev(dev);
