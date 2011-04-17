@@ -201,8 +201,17 @@ static uint32_t s5l8900_chipid_read(void *opaque, target_phys_addr_t addr)
 	S5L8900_DEBUG(S5L8900_DEBUG_CHIPID, S5L8900_DLVL_WARN, "%s: offset = 0x%02x\n", __FUNCTION__, (int)addr);
 
 	switch(addr) {
-			case 0x04:
+			case 0x04:	
+			#if 0 /* only enable if your on 3.1.3 */
+				{
+					uint32_t debug_uart = 0xffffffff;
+					cpu_physical_memory_write(0x1802765C, (uint8_t *)&debug_uart, 4);
+				}
+			#endif
 				return 0xfffffffc;
+        	case 0x8:
+                return 0x4;
+
 		default:
 			 S5L8900_DEBUG(S5L8900_DEBUG_CHIPID, S5L8900_DLVL_ERR, "%s: UNMAPPED offset = 0x%02x\n", __FUNCTION__, (int)addr);
 	}
@@ -222,6 +231,46 @@ static CPUWriteMemoryFunc *s5l8900_chipid_writefn[] = {
     NULL,
 };
 
+static void s5l8900_gpioic_write(void *opaque, target_phys_addr_t addr, uint32_t value)
+{
+    //fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __func__, addr, value);
+}
+
+static uint32_t s5l8900_gpioic_read(void *opaque, target_phys_addr_t addr)
+{
+    //fprintf(stderr, "%s: offset 0x%08x\n", __func__, addr);
+
+    switch(addr) {
+		case 0x44:
+			return 0x5000005;
+        case 0x7a:
+		case 0x7c:
+            return 1;
+    }
+
+    return 0;
+}
+
+static CPUReadMemoryFunc *s5l8900_gpioic_readfn[] = {
+    s5l8900_gpioic_read,
+    s5l8900_gpioic_read,
+    s5l8900_gpioic_read,
+};
+
+static CPUWriteMemoryFunc *s5l8900_gpioic_writefn[] = {
+    s5l8900_gpioic_write,
+    s5l8900_gpioic_write,
+    s5l8900_gpioic_write,
+};
+
+static void s5l8900_gpioic_init(target_phys_addr_t base)
+{
+
+    int iomemtype = cpu_register_io_memory(s5l8900_gpioic_readfn,
+                                           s5l8900_gpioic_writefn, NULL, DEVICE_LITTLE_ENDIAN);
+    cpu_register_physical_memory(base, 0x3FF, iomemtype);
+}
+
 static void s5l8900_chipid_init(target_phys_addr_t base)
 {
 
@@ -238,11 +287,15 @@ static void s5l8900_gpio_write(void *opaque, target_phys_addr_t addr, uint32_t v
 
 static uint32_t s5l8900_gpio_read(void *opaque, target_phys_addr_t addr)
 {
+    fprintf(stderr, "%s: offset 0x%08x\n", __func__, addr);
+
 	switch(addr) {
+		case 0x7a:
+			return 1;
 		case 0x2c4:
 			return s5l8900_gpio_state[0].gpio_state;
 	}
-	fprintf(stderr, "%s: offset 0x%08x\n", __func__, addr);
+
     return 0;
 }
 
@@ -403,6 +456,9 @@ s5l8900_state *s5l8900_init(void)
 
 	/* GPIO */
 	s5l8900_gpio_init(S5L8900_GPIO_BASE);
+
+	/* GPIOIC */
+	s5l8900_gpioic_init(S5L8900_GPIOIC_BASE);
 
 	/* Uart */
     s5l8900_uart_init(S5L8900_UART0_BASE, 0, 256, s5l8900_get_irq(s, S5L8900_IRQ_UART0), serial_hds[0]);

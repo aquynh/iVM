@@ -6,6 +6,7 @@
 // Devices
 
 // GPIO
+#define S5L8900_GPIOIC_BASE			   0x39A00000
 #define S5L8900_GPIO_BASE              0x3E400000
 #define S5L8900_IRQ_GPIO0              0x21
 #define S5L8900_IRQ_GPIO1              0x20

@@ -151,7 +151,7 @@ int skin_activate_layout(SkinScreen* skin, int rotation)
         //printf("skin_config.c: skin_activate_layout, no landscape or portrait\n");
         return result;
     }
-    printf("skin_config.c: skin_activate_layout, rotation=%d\n", rotation);
+    //printf("skin_config.c: skin_activate_layout, rotation=%d\n", rotation);
     SkinLayout* layout = skin->config->landscape;
     if (!skin->config->landscape) {
         layout = skin->config->portrait;

@@ -48,7 +48,7 @@ static uint8_t pcf50633_read_data(SMBusDevice *dev, uint8_t cmd, int n)
 
 static void pcf50633_quick_cmd(SMBusDevice *dev, uint8_t read)
 {
-    fprintf(stderr, "%s: addr=0x%02x read=%d\n", __func__, dev->i2c.address, read);
+    //fprintf(stderr, "%s: addr=0x%02x read=%d\n", __func__, dev->i2c.address, read);
 }
 
 static void pcf50633_send_byte(SMBusDevice *dev, uint8_t val)
