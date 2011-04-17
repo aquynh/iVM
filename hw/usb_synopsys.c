@@ -768,6 +768,7 @@ static void synopsys_usb_write(void *_arg, target_phys_addr_t _addr, uint32_t _v
 	{
 	case PCGCCTL:
 		state->pcgcctl = _val;
+		synopsys_usb_update_irq(state);
 		return;
 
 	case GOTGCTL:
