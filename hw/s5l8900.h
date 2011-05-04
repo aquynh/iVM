@@ -4,9 +4,11 @@
 #include "qemu-timer.h"
 
 // Devices
+// SYSIC/MIU
+#define S5L8900_SYSIC_BASE 0x39A00000
+#define POWER_ID 0x44
 
 // GPIO
-#define S5L8900_GPIOIC_BASE			   0x39A00000
 #define S5L8900_GPIO_BASE              0x3E400000
 #define S5L8900_IRQ_GPIO0              0x21
 #define S5L8900_IRQ_GPIO1              0x20
@@ -32,10 +34,6 @@
 #define PCF50633_ADDR_SET 0xe7
 #define BUTTONS_IIC_STATE 0x4B
 
-// MIU
-#define MIU_BASE 0x39A00000 
-#define POWER_ID 0x44
-
 // Chip ID
 #define S5L8900_CHIPID	 0x3e500000
 
@@ -45,10 +43,21 @@
 #define S5L8900_IRQ_UART0 	24
 
 // TIMERS
-#define S5L8900_IRQ_TIMER0	7
-#define S5L8900_TIMER1	0x3E200000
+#define IRQ_TIMER0	7
+#define TIMER_IRQSTAT 0x10000
+#define TIMER_IRQLATCH 0xF8
+#define TIMER1	0x3E200000
 #define TIMER_TICKSHIGH 0x80
 #define TIMER_TICKSLOW 0x84
+#define TIMER_STATE_START 1
+#define TIMER_STATE_STOP 0
+#define TIMER_STATE_MANUALUPDATE 2
+#define NUM_TIMERS 7
+#define TIMER_4 0xA0
+#define TIMER_CONFIG 0 
+#define TIMER_STATE 0x4
+#define TIMER_COUNT_BUFFER 0x8
+#define TIMER_COUNT_BUFFER2 0xC
 
 // VIC
 #define S5l8900_I2C0_BASE 0x3C600000

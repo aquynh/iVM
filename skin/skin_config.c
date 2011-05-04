@@ -171,8 +171,8 @@ int skin_activate_layout(SkinScreen* skin, int rotation)
     if (layout->width == 0 || layout->height == 0) {
         // No value given in XML, use some default
         //printf("Default layout values\n");
-        layout->width = 732;
-        layout->height = 392;
+        layout->width = 320;
+        layout->height = 480;
     }
     if (layout->emuscreen_width == 0 || layout->emuscreen_height == 0) {
         // No default value given, make it 800x480 then

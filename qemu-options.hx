@@ -760,6 +760,15 @@ Enable/disable audio stream compression (using celt 0.5.1).  Default is on.
 @end table
 ETEXI
 
+DEF("firmware", HAS_ARG, QEMU_OPTION_iosfirmware,
+    "-firmware       iOS firmware version\n",
+    QEMU_ARCH_ARM)
+STEXI
+@item -firmware @var{firmware}
+@findex -firmware
+iOS firmware version
+ETEXI
+
 DEF("portrait", 0, QEMU_OPTION_portrait,
     "-portrait       rotate graphical output 90 deg left (only PXA LCD)\n",
     QEMU_ARCH_ALL)

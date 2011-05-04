@@ -126,8 +126,8 @@ static uint32_t s5l8900_i2c_read(void *opaque, target_phys_addr_t offset)
 			return tmp_reg20; 
 		}
     default:
-        hw_error("s5l8900.i2c: bad read offset 0x" TARGET_FMT_plx "\n",
-                 offset);
+        //hw_error("s5l8900.i2c: bad read offset 0x" TARGET_FMT_plx "\n", offset);
+		fprintf(stderr, "%s: bad read offset 0x%08x\n", __func__, offset);
     }
     return 0;
 }
@@ -229,8 +229,8 @@ static void s5l8900_i2c_write(void *opaque, target_phys_addr_t offset,
 		//s->iicreg20 &= ~value;
 		break;
     default:
-        hw_error("s5l8900.i2c: bad write offset 0x" TARGET_FMT_plx "\n",
-                 offset);
+        //hw_error("s5l8900.i2c: bad write offset 0x" TARGET_FMT_plx "\n", offset);
+		fprintf(stderr, "%s: bad write offset 0x%08x\n", __func__, offset);
     }
 }
 

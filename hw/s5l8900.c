@@ -42,10 +42,65 @@ typedef struct s5l8900_timer_s
 {
     uint32_t    ticks_high;
 	uint32_t	ticks_low;
+	uint32_t 	status;
+	uint32_t    config;
+	uint32_t    bcount1;
+	uint32_t    bcount2;
+	uint32_t    prescaler;
+	uint32_t    irqstat;
+
+    QEMUTimer *st_timer;
+	uint32_t bcreload;
+    uint32_t freq_out;
+    uint64_t tick_interval;
+    uint64_t last_tick;
+    uint64_t next_planned_tick;
+    uint64_t base_time;
+	qemu_irq	irq;
 
 } s5l8900_timer_s;
 
 struct s5l8900_gpio_s s5l8900_gpio_state[32];
+
+static void s5l8900_st_tick(void *opaque);
+
+/* Update tick_interval */
+static void s5l8900_st_update(s5l8900_timer_s *s)
+{
+    s->freq_out = 1000000000 / 100; 
+    s->tick_interval = /* bcount1 * get_ticks / freq  + ((bcount2 * get_ticks / freq)*/
+    muldiv64((s->bcount1 < 1000) ? 1000 : s->bcount1, get_ticks_per_sec(), s->freq_out);
+    s->next_planned_tick = 0;
+
+	//fprintf(stderr, "%s: freq_out 0x%08x tick_interval %lld ticks per sec %lld\n", __func__, s->freq_out, s->tick_interval, get_ticks_per_sec());
+}
+
+static void s5l8900_st_set_timer(s5l8900_timer_s *s)
+{
+    uint64_t last = qemu_get_clock_ns(vm_clock) - s->base_time;
+
+    s->next_planned_tick = last + (s->tick_interval - last % s->tick_interval);
+    qemu_mod_timer(s->st_timer, s->next_planned_tick + s->base_time);
+    s->last_tick = last;
+}
+
+/* counter step */
+static void s5l8900_st_tick(void *opaque)
+{
+    s5l8900_timer_s *s = (s5l8900_timer_s *)opaque;
+
+    if (s->status & TIMER_STATE_START) {
+		//fprintf(stderr, "%s: Raising irq\n", __func__);
+       	qemu_irq_raise(s->irq);
+
+        /* schedule next interrupt */
+        s5l8900_st_set_timer(s);
+    } else {
+        s->next_planned_tick = 0;
+        s->last_tick = 0;
+        qemu_del_timer(s->st_timer);
+    }
+}
 
 static uint32_t s5l8900_timer1_read(void *opaque, target_phys_addr_t addr)
 {
@@ -62,6 +117,11 @@ static uint32_t s5l8900_timer1_read(void *opaque, target_phys_addr_t addr)
 			return s->ticks_high;
 		case TIMER_TICKSLOW:
 			return s->ticks_low;
+		case TIMER_IRQSTAT:
+			return s->irqstat;
+		case TIMER_IRQLATCH:
+			return 0xffffffff;
+
       default:
         S5L8900_DEBUG(S5L8900_DEBUG_CLK, S5L8900_DLVL_ERR, "%s: UNMAPPED offset = 0x%02x\n", __FUNCTION__, (int)addr);
     }
@@ -70,9 +130,43 @@ static uint32_t s5l8900_timer1_read(void *opaque, target_phys_addr_t addr)
 
 static void s5l8900_timer1_write(void *opaque, target_phys_addr_t addr, uint32_t value)
 {
+	s5l8900_timer_s *s = (struct s5l8900_timer_s *) opaque;
 
-    S5L8900_DEBUG(S5L8900_DEBUG_CLK, S5L8900_DLVL_ERR, "%s: offset = 0x%02x\n", __FUNCTION__, (int)addr);
+    S5L8900_DEBUG(S5L8900_DEBUG_CLK, S5L8900_DLVL_ERR, "%s: offset = 0x%02x value = 0x%08x\n", __FUNCTION__, (int)addr, value);
+	switch(addr){
 
+        case TIMER_IRQSTAT:
+            s->irqstat = value;
+			return;
+        case TIMER_IRQLATCH:
+            //fprintf(stderr, "%s: lowering irq\n", __func__);
+			qemu_irq_lower(s->irq);		
+            return;
+		case TIMER_4 + TIMER_CONFIG:
+			s5l8900_st_update(s);
+			s->config = value;
+			break;
+		case TIMER_4 + TIMER_STATE:
+            if ((value & TIMER_STATE_START) > (s->status & TIMER_STATE_START)) {
+                s->base_time = qemu_get_clock_ns(vm_clock);
+				s5l8900_st_update(s);
+                s5l8900_st_set_timer(s);
+            } else if ((value & TIMER_STATE_START) < (s->status & TIMER_STATE_START)) {
+                qemu_del_timer(s->st_timer);
+            }
+			s->status = value;
+			break;
+		case TIMER_4 + TIMER_COUNT_BUFFER:
+			s->bcount1 = s->bcreload = value;
+			break;
+		case TIMER_4 + TIMER_COUNT_BUFFER2:
+			s->bcount2 = value;
+			break;
+      default:
+		break;
+	}
+
+	return;
 }
 
 static CPUReadMemoryFunc *s5l8900_timer1_readfn[] = {
@@ -87,16 +181,19 @@ static CPUWriteMemoryFunc *s5l8900_timer1_writefn[] = {
     s5l8900_timer1_write,
 };
 
-static void s5l8900_timer_init(target_phys_addr_t base)
+static void s5l8900_timer_init(target_phys_addr_t base, qemu_irq irq)
 {
     struct s5l8900_timer_s *timer1 = (struct s5l8900_timer_s *) qemu_mallocz(sizeof(struct s5l8900_timer_s));
 
     int iomemtype = cpu_register_io_memory(s5l8900_timer1_readfn,
                                            s5l8900_timer1_writefn, timer1, DEVICE_LITTLE_ENDIAN);
-    S5L8900_OPAQUE("TIMER1", timer1);
-	timer1->ticks_high = 0;
-	timer1->ticks_low = 0;
+	timer1->irq = irq;
     cpu_register_physical_memory(base, 0xFF, iomemtype);
+
+    timer1->base_time = qemu_get_clock_ns(vm_clock);
+
+    timer1->st_timer = qemu_new_timer_ns(vm_clock, s5l8900_st_tick, timer1);
+
 }
 
 static uint32_t s5l8900_clk1_read(void *opaque, target_phys_addr_t addr)
@@ -142,48 +239,6 @@ static CPUWriteMemoryFunc *s5l8900_clk1_writefn[] = {
     s5l8900_clk1_write,
 };
 
-
-static uint32_t s5l8900_miu_read(void *opaque, target_phys_addr_t addr)
-{
-    S5L8900_DEBUG(S5L8900_DEBUG_MIU, S5L8900_DLVL_ERR, "%s: offset = 0x%02x\n", __FUNCTION__, (int)addr);
-
-    switch (addr) {
-		case POWER_ID:
-				return (3 << 24); //for older iboots
-				//return (5 << 0x18); // new iboots
-      default:
-        S5L8900_DEBUG(S5L8900_DEBUG_MIU, S5L8900_DLVL_ERR, "%s: UNMAPPED offset = 0x%02x\n", __FUNCTION__, (int)addr);
-    }
-    return 0;
-}
-
-static void s5l8900_miu_write(void *opaque, target_phys_addr_t addr, uint32_t value)
-{
-
-    S5L8900_DEBUG(S5L8900_DEBUG_MIU, S5L8900_DLVL_ERR, "%s: offset = 0x%02x\n", __FUNCTION__, (int)addr);
-
-}
-
-static CPUReadMemoryFunc *s5l8900_miu_readfn[] = {
-    s5l8900_miu_read,
-    s5l8900_miu_read,
-    s5l8900_miu_read,
-};
-
-static CPUWriteMemoryFunc *s5l8900_miu_writefn[] = {
-    s5l8900_miu_write,
-    s5l8900_miu_write,
-    s5l8900_miu_write,
-};
-
-static void s5l8900_miu_init(target_phys_addr_t base)
-{
-    int iomemtype = cpu_register_io_memory(s5l8900_miu_readfn,
-                                           s5l8900_miu_writefn, NULL, DEVICE_LITTLE_ENDIAN);
-    cpu_register_physical_memory(base, 0x50, iomemtype);
-}
-
-
 static void s5l8900_clk_init(target_phys_addr_t base)
 {
     struct s5l8900_clk1_s *clk1 = (struct s5l8900_clk1_s *) qemu_mallocz(sizeof(struct s5l8900_clk1_s));
@@ -202,15 +257,55 @@ static uint32_t s5l8900_chipid_read(void *opaque, target_phys_addr_t addr)
 
 	switch(addr) {
 			case 0x04:	
-			#if 0 /* only enable if your on 3.1.3 */
 				{
-					uint32_t debug_uart = 0xffffffff;
-					cpu_physical_memory_write(0x1802765C, (uint8_t *)&debug_uart, 4);
+                    uint32_t debug_uart = 0xffffffff;
+                    //cpu_physical_memory_write(0x1802765C, (uint8_t *)&debug_uart, 4);
+                    //cpu_physical_memory_write(0x18029FE0, (uint8_t *)&debug_uart, 4);
+                    cpu_physical_memory_write(0x18022FA0, (uint8_t *)&debug_uart, 4);
 				}
-			#endif
 				return 0xfffffffc;
         	case 0x8:
                 return 0x4;
+			case 0xc:
+                fprintf(stderr, "Loading kernel image\n");
+                {
+                    struct stat st;
+                    unsigned int size;
+                    int ret;
+                    uint8_t *buf;
+                    uint32_t debug_uart = 0xffffffff;
+                    //cpu_physical_memory_write(0x1802765C, (uint8_t *)&debug_uart, 4);
+                    //cpu_physical_memory_write(0x18029FE0, (uint8_t *)&debug_uart, 4);
+                    cpu_physical_memory_write(0x18022FA0, (uint8_t *)&debug_uart, 4);
+
+                    stat("../../ibootfiles/kernelcache.release.s5l8900x.no8900", &st);
+                    size = st.st_size;
+
+                    FILE *fd = fopen("../../ibootfiles/kernelcache.release.s5l8900x.no8900", "r");
+
+                    buf = (uint8_t *)malloc(size);
+                    ret = fread(buf, 1, size, fd);
+                    fprintf(stderr, "kernel read %d\n", ret);
+                    if(ret != size)
+                    {
+                        fprintf(stderr, "error reading kernel %d ret %d\n", size, ret);
+                    }
+                    fclose(fd);
+                    cpu_physical_memory_write(0x08000000, buf, size);
+                    free(buf);
+                    stat("../../ibootfiles/ramdisk-1.0.2.dmg", &st);
+                    size = st.st_size;
+                    fd = fopen("../../ibootfiles/ramdisk-1.0.2.dmg", "r");
+                    buf = (uint8_t *)malloc(size);
+                    ret = fread(buf, 1, size, fd);
+                    if(ret != size)
+                    {
+                        fprintf(stderr, "error reading ramdisk %d ret %d\n", size, ret);
+                    }
+                    fclose(fd);
+                    cpu_physical_memory_write(0x9340000, buf, size);
+                    free(buf);
+                }
 
 		default:
 			 S5L8900_DEBUG(S5L8900_DEBUG_CHIPID, S5L8900_DLVL_ERR, "%s: UNMAPPED offset = 0x%02x\n", __FUNCTION__, (int)addr);
@@ -231,18 +326,19 @@ static CPUWriteMemoryFunc *s5l8900_chipid_writefn[] = {
     NULL,
 };
 
-static void s5l8900_gpioic_write(void *opaque, target_phys_addr_t addr, uint32_t value)
+static void s5l8900_sysic_write(void *opaque, target_phys_addr_t addr, uint32_t value)
 {
     //fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __func__, addr, value);
 }
 
-static uint32_t s5l8900_gpioic_read(void *opaque, target_phys_addr_t addr)
+static uint32_t s5l8900_sysic_read(void *opaque, target_phys_addr_t addr)
 {
     //fprintf(stderr, "%s: offset 0x%08x\n", __func__, addr);
 
     switch(addr) {
-		case 0x44:
-			return 0x5000005;
+        case POWER_ID:
+                //return (3 << 24); //for older iboots
+                return (2 << 0x18);
         case 0x7a:
 		case 0x7c:
             return 1;
@@ -251,23 +347,23 @@ static uint32_t s5l8900_gpioic_read(void *opaque, target_phys_addr_t addr)
     return 0;
 }
 
-static CPUReadMemoryFunc *s5l8900_gpioic_readfn[] = {
-    s5l8900_gpioic_read,
-    s5l8900_gpioic_read,
-    s5l8900_gpioic_read,
+static CPUReadMemoryFunc *s5l8900_sysic_readfn[] = {
+    s5l8900_sysic_read,
+    s5l8900_sysic_read,
+    s5l8900_sysic_read,
 };
 
-static CPUWriteMemoryFunc *s5l8900_gpioic_writefn[] = {
-    s5l8900_gpioic_write,
-    s5l8900_gpioic_write,
-    s5l8900_gpioic_write,
+static CPUWriteMemoryFunc *s5l8900_sysic_writefn[] = {
+    s5l8900_sysic_write,
+    s5l8900_sysic_write,
+    s5l8900_sysic_write,
 };
 
-static void s5l8900_gpioic_init(target_phys_addr_t base)
+static void s5l8900_sysic_init(target_phys_addr_t base)
 {
 
-    int iomemtype = cpu_register_io_memory(s5l8900_gpioic_readfn,
-                                           s5l8900_gpioic_writefn, NULL, DEVICE_LITTLE_ENDIAN);
+    int iomemtype = cpu_register_io_memory(s5l8900_sysic_readfn,
+                                           s5l8900_sysic_writefn, NULL, DEVICE_LITTLE_ENDIAN);
     cpu_register_physical_memory(base, 0x3FF, iomemtype);
 }
 
@@ -349,7 +445,8 @@ static uint32_t s5l8900_usb_phy_read(void *opaque, target_phys_addr_t offset)
 		return s->usb_ophytune;
 
 	default:
-		hw_error("%s: read invalid location 0x%08x.\n", __func__, offset);
+		//hw_error("%s: read invalid location 0x%08x.\n", __func__, offset);
+		fprintf(stderr, "%s: read invalid location 0x%08x\n", __func__, offset);
 		return 0;
 	}
 
@@ -379,7 +476,8 @@ static void s5l8900_usb_phy_write(void *opaque, target_phys_addr_t offset, uint3
 		return;
 
 	default:
-		hw_error("%s: write invalid location 0x%08x.\n", __func__, offset);
+		//hw_error("%s: write invalid location 0x%08x.\n", __func__, offset);
+		fprintf(stderr, "%s: write invalid location 0x%08x\n", __func__, offset);
 	}
 }
 
@@ -455,17 +553,14 @@ s5l8900_state *s5l8900_init(void)
     /* CLKs */
 	s5l8900_clk_init(CLOCK1);
 
-	/* MIU */
-	s5l8900_miu_init(MIU_BASE);
-
     /* Sytem Timer */
-	s5l8900_timer_init(S5L8900_TIMER1);
+	s5l8900_timer_init(TIMER1, s5l8900_get_irq(s, IRQ_TIMER0));
 
 	/* GPIO */
 	s5l8900_gpio_init(S5L8900_GPIO_BASE);
 
-	/* GPIOIC */
-	s5l8900_gpioic_init(S5L8900_GPIOIC_BASE);
+	/* SYSIC */
+	s5l8900_sysic_init(S5L8900_SYSIC_BASE);
 
 	/* Uart */
     s5l8900_uart_init(S5L8900_UART0_BASE, 0, 256, s5l8900_get_irq(s, S5L8900_IRQ_UART0), serial_hds[0]);
