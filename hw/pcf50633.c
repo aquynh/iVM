@@ -24,7 +24,7 @@ static void pcf50633_reset(void *opaque)
 static void pcf50633_write_data(SMBusDevice *dev, uint8_t cmd,
                                 uint8_t *buf, int len)
 {
-    //fprintf(stderr, "%s: cmd 0x%08x len 0x%08x\n", __func__, cmd, len);
+    fprintf(stderr, "%s: cmd 0x%08x len 0x%08x\n", __func__, cmd, len);
 
     switch (cmd) {
     default:
@@ -36,7 +36,7 @@ static void pcf50633_write_data(SMBusDevice *dev, uint8_t cmd,
 
 static uint8_t pcf50633_read_data(SMBusDevice *dev, uint8_t cmd, int n)
 {
-	//fprintf(stderr, "%s: cmd 0x%08x n 0x%08x\n", __func__, cmd, n);
+	fprintf(stderr, "%s: cmd 0x%08x n 0x%08x\n", __func__, cmd, n);
     switch (cmd) {
     default:
         //hw_error("pcf50633: bad read offset 0x%x\n", cmd);
@@ -48,14 +48,14 @@ static uint8_t pcf50633_read_data(SMBusDevice *dev, uint8_t cmd, int n)
 
 static void pcf50633_quick_cmd(SMBusDevice *dev, uint8_t read)
 {
-    //fprintf(stderr, "%s: addr=0x%02x read=%d\n", __func__, dev->i2c.address, read);
+    fprintf(stderr, "%s: addr=0x%02x read=%d\n", __func__, dev->i2c.address, read);
 }
 
 static void pcf50633_send_byte(SMBusDevice *dev, uint8_t val)
 {
 	pcf50633State *s = (pcf50633State *)dev;
 
-    //fprintf(stderr, "%s: addr=%02x val=%02x\n",__func__, dev->i2c.address, val);
+    fprintf(stderr, "%s: addr=%02x val=%02x\n",__func__, dev->i2c.address, val);
 
 	s->cmd=val;
 	
@@ -65,7 +65,9 @@ static uint8_t pcf50633_receive_byte(SMBusDevice *dev)
 {
 	pcf50633State *s = (pcf50633State *)dev;
 
-    //fprintf(stderr, "%s: addr=0x%02x cmd=0x%02x\n",__func__, dev->i2c.address, s->cmd);
+    fprintf(stderr, "%s: addr=0x%02x cmd=0x%02x\n",__func__, dev->i2c.address, s->cmd);
+
+	return 0xff;
 
 	switch(s->cmd) {
 		case BUTTONS_IIC_STATE:

@@ -1,6 +1,16 @@
 /* NOR flash devices */
 typedef struct pflash_t pflash_t;
 
+void pflash_set_rxlen(void *opaque, uint32_t rxLen);
+void pflash_cmd_set(void *opaque, uint32_t *cmd);
+uint32_t pflash_cmd_len(void *opaque);
+uint32_t pflash_cmd_parse(void *opaque);
+pflash_t *pflash_spi_register(  ram_addr_t off,
+                                BlockDriverState *bs, uint32_t sector_len,
+                                int nb_blocs, int nb_mappings, int width,
+                                uint16_t id0, uint16_t id1, uint16_t id2);
+
+
 /* pflash_cfi01.c */
 pflash_t *pflash_cfi01_register(target_phys_addr_t base, ram_addr_t off,
                                 BlockDriverState *bs,
@@ -19,10 +29,11 @@ pflash_t *pflash_cfi02_register(target_phys_addr_t base, ram_addr_t off,
 
 /* nand.c */
 typedef struct NANDFlashState NANDFlashState;
-NANDFlashState *nand_init(int manf_id, int chip_id);
-void nand_done(NANDFlashState *s);
+uint32_t nand_read(NANDFlashState *s, uint32_t ce, uint32_t offset, uint32_t size, uint32_t *res);
 void nand_setpins(NANDFlashState *s,
                 int cle, int ale, int ce, int wp, int gnd);
+NANDFlashState *nand_init(int manf_id, int chip_id);
+void nand_done(NANDFlashState *s);
 void nand_getpins(NANDFlashState *s, int *rb);
 void nand_setio(NANDFlashState *s, uint8_t value);
 uint8_t nand_getio(NANDFlashState *s);

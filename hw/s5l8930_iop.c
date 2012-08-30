@@ -54,55 +54,6 @@ static void do_iop_run(void *opaque)
 	uint32_t address;
 	target_ulong size;
     int prot, zbits, ret;
-	/*
-	int mmu_idx = cpu_mmu_index(s->iopenv);
-	int cpu_index;
-	uint32_t uncached_cpsr;
-	uint32_t spsr;
-	*/
-    //cpu_index = s->iopenv->cpu_index;
-
-	//uncached_cpsr = s->iopenv->uncached_cpsr;
-	//spsr = s->iopenv->spsr;
-	/*
-    memcpy(s->iopenv, s->env, sizeof(CPUState));
-
-    s->env->next_cpu = s->iopenv;
-    s->iopenv->cpu_index = cpu_index;
-    s->iopenv->next_cpu = NULL;
-
-	memset(s->iopenv->regs, 0, 16 * sizeof(uint32_t));
-	//s->iopenv->uncached_cpsr = uncached_cpsr;
-	//s->iopenv->spsr = spsr;
-	s->iopenv->spsr = 0x13;
-	s->iopenv->uncached_cpsr = 0x13;
-	memset(s->iopenv->banked_spsr, 0, 7 * sizeof(uint32_t));
-	memset(s->iopenv->banked_r13, 0, 7 * sizeof(uint32_t));
-	memset(s->iopenv->banked_r14, 0, 7 * sizeof(uint32_t));
-	memset(s->iopenv->usr_regs, 0, 5 * sizeof(uint32_t));
-	memset(s->iopenv->fiq_regs, 0, 5 * sizeof(uint32_t));
-	s->iopenv->thumb = 0;
-
-	tlb_flush_page(s->iopenv, 0x0);
-	tlb_flush_page(s->iopenv, 0x86300000);
-	tlb_flush_page(s->iopenv, 0xbf300000);
-	*/
-	/*
-	tlb_flush(s->iopenv, 0);
-	physical = 0x40959000;
-	address = 0x0;
-	page_size = 0x29000;
-	size = 0x400;	
-	prot = 7;
-	for (end = physical + page_size; physical < end; physical += 0x400) {
-		tlb_set_page(s->iopenv, address, physical, prot, mmu_idx, size);
-			address += 0x400;
-	}
-	*/
-	//cpu_synchronize_all_states();
-	//pause_all_vcpus();
-	//cpu_interrupt(s->env, CPU_INTERRUPT_HALT);
-
 	/* hack to fix some power gate init issue @ pmgr_enable_gates */
 	uint8_t buf[] = {0x00,0x20}; /* nop */
 	uint32_t addr = 0x40762790;
@@ -312,20 +263,8 @@ void s5l8930_iop_init(void *opaque)
     cpu_register_physical_memory(base, 0x1000, io);
 
 	setTimerIRQ2(s->timer, s5l8930_iop_get_irq(s, S5L8930_TIMER0_IRQ));
-	/*
-    s = (s5l8930_iop_s *) qemu_mallocz(sizeof(s5l8930_iop_s));
-    s->name = name1;
-	iop->env = sl8930->env;
-	iop->iopenv = env;
-    base = 0xbf300000;
-    io = cpu_register_io_memory(s5l8930_iop_readfn, s5l8930_iop_writefn, iop, DEVICE_LITTLE_ENDIAN);
-    cpu_register_physical_memory(base, 0x1000, io);
-	*/
 	IOPCpuState = s->iopenv;
 	MainCpuState = s5l8930->env;
 	IOPState = s;
-	//iop_unmapped_hw_init(0x409597F0, 0x100, iop_txbuf);
 	cpu_interrupt(env, CPU_INTERRUPT_HALT);
-    //env->stop = 1;
-    //qemu_cpu_kick(env);
 }

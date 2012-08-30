@@ -2196,7 +2196,13 @@ void tlb_set_page(CPUState *env, target_ulong vaddr,
     CPUWatchpoint *wp;
     target_phys_addr_t iotlb;
 
-    assert(size >= TARGET_PAGE_SIZE);
+#if defined(DEBUG_TLB)
+    fprintf(stderr, "tlb_set_page: vaddr=" TARGET_FMT_lx " paddr=0x" TARGET_FMT_plx
+           " prot=%x idx=%d size=0x%08x target_page_size 0x%x\n",
+           vaddr, paddr, prot, mmu_idx, size, TARGET_PAGE_SIZE);
+#endif
+
+    //assert(size >= TARGET_PAGE_SIZE);
     if (size != TARGET_PAGE_SIZE) {
         tlb_add_large_page(env, vaddr, size);
     }
@@ -2206,10 +2212,10 @@ void tlb_set_page(CPUState *env, target_ulong vaddr,
     } else {
         pd = p->phys_offset;
     }
-#if defined(DEBUG_TLB)
-    printf("tlb_set_page: vaddr=" TARGET_FMT_lx " paddr=0x" TARGET_FMT_plx
-           " prot=%x idx=%d pd=0x%08lx\n",
-           vaddr, paddr, prot, mmu_idx, pd);
+#if 0
+    fprintf(stderr, "tlb_set_page: vaddr=" TARGET_FMT_lx " paddr=0x" TARGET_FMT_plx
+           " prot=%x idx=%d pd=0x%08lx size=0x%08lx\n",
+           vaddr, paddr, prot, mmu_idx, pd, size);
 #endif
 
     address = vaddr;
@@ -4342,6 +4348,11 @@ void cpu_io_recompile(CPUState *env, void *retaddr)
 }
 
 #if !defined(CONFIG_USER_ONLY)
+
+CPUState *get_current_cpu(void)
+{
+	return cpu_single_env;
+}
 
 void dump_exec_info(FILE *f, fprintf_function cpu_fprintf)
 {

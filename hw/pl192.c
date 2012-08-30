@@ -7,6 +7,12 @@
 
 #include "sysbus.h"
 #include "primecell.h"
+#include "cpu.h"
+#include "cpu-all.h"
+
+
+extern CPUState *getIOPCpuEnv(void);
+extern CPUState *getMainCpuEnv(void);
 
 
 #define PL192_INT_SOURCES   32
@@ -94,7 +100,7 @@ static void pl192_raise(pl192_state *s, int is_fiq)
                 /* FIQ is directly propagated through daisy chain */
                 pl192_raise(s->daisy, is_fiq);
             } else {
-                hw_error("pl192: cannot raise FIQ. This usually means that "
+                fprintf(stderr, "pl192i cannot raise FIQ. This usually means that "
                          "initialization was done incorrectly.\n");
             }
         }
@@ -120,6 +126,14 @@ static void pl192_raise(pl192_state *s, int is_fiq)
 
 static void pl192_lower(pl192_state *s, int is_fiq)
 {
+    /* hack for arm7 cpu */
+#if 0
+    if((s->irq_status & 0x8) & (s->instance == 0))
+    {
+        fprintf(stderr, "pl192_lower: starting iop cpu after irq was handled\n");
+        cpu_interrupt(getIOPCpuEnv(), CPU_INTERRUPT_EXITTB);
+    }
+#endif
     /* Lower parrent interrupt if there is one */
     if (is_fiq && s->fiq) {
         qemu_irq_lower(s->fiq);
@@ -259,17 +273,23 @@ static void pl192_irq_fin(pl192_state *s)
         pl192_unmask_priority(s->daisy_callback);
     }
     pl192_update(s);
-    if (s->current == PL192_NO_IRQ) {
+
+	/* hmm is this right?*/
+	/*
+    if (s->current == PL192_NO_IRQ && (s->current_highest >= PL192_INT_SOURCES)) {
         pl192_lower(s, 0);
     }
+	*/
 }
 
 static uint32_t pl192_read(void *opaque, target_phys_addr_t offset)
 {
     pl192_state *s = (pl192_state *) opaque;
 
+    //fprintf(stderr, "%s: instance %d - offset 0x%08x\n", __FUNCTION__, s->instance, offset);
+
     if (offset & 3) {
-        hw_error("pl192: bad read offset " TARGET_FMT_plx "\n", offset);
+        fprintf(stderr, "pl192: bad read offset " TARGET_FMT_plx "\n", offset);
         return 0;
     }
 
@@ -285,6 +305,7 @@ static uint32_t pl192_read(void *opaque, target_phys_addr_t offset)
 
     switch (offset) {
         case PL192_IRQSTATUS:
+			//fprintf(stderr, "%s: irqstatus 0x%08x\n", __FUNCTION__, s->irq_status);
             return s->irq_status;
         case PL192_FIQSTATUS:
             return s->fiq_status;
@@ -305,7 +326,7 @@ static uint32_t pl192_read(void *opaque, target_phys_addr_t offset)
         case PL192_INTENCLEAR:
 			return 0;
         case PL192_SOFTINTCLEAR:
-            hw_error("pl192: attempt to read write-only register (offset = "
+            fprintf(stderr, "pl192: attempt to read write-only register (offset = "
                      TARGET_FMT_plx ")\n", offset);
         case PL192_VECTADDR:
             return pl192_irq_ack(s);
@@ -315,7 +336,7 @@ static uint32_t pl192_read(void *opaque, target_phys_addr_t offset)
         case PL190_DEFVECTADDR:
             return 0;
         default:
-            hw_error("pl192: bad read offset " TARGET_FMT_plx "\n", offset);
+            fprintf(stderr, "pl192: bad read offset " TARGET_FMT_plx "\n", offset);
             return 0;
     }
 }
@@ -324,6 +345,8 @@ static void pl192_write(void *opaque, target_phys_addr_t offset,
                         uint32_t value)
 {
     pl192_state *s = (pl192_state *) opaque;
+	
+	//fprintf(stderr, "%s: instance %d - offset 0x%08x value 0x%08x\n", __FUNCTION__, s->instance, offset, value);
 
     if (offset & 3) {
         hw_error("pl192: bad write offset " TARGET_FMT_plx "\n", offset);
@@ -365,6 +388,24 @@ static void pl192_write(void *opaque, target_phys_addr_t offset,
             break;
         case PL192_SOFTINT:
             s->softint |= value;
+#if 0
+			/* MAIN CPU -> IOP */
+			if((value & 0x8) && (s->instance == 4))
+			{
+					fprintf(stderr, "pl192_raise: halting main cpu to handle irq\n");
+					cpu_interrupt(getMainCpuEnv(), CPU_INTERRUPT_HALT);
+					cpu_interrupt(getIOPCpuEnv(), CPU_INTERRUPT_EXITTB);
+					return;
+			}
+			/* IOP -> MAIN CPU */
+            if((value & 0x8) && (s->instance == 0))
+            {
+                    fprintf(stderr, "pl192_raise: halting iop cpu to handle irq\n");
+                    cpu_interrupt(getIOPCpuEnv(), CPU_INTERRUPT_HALT);
+					cpu_interrupt(getMainCpuEnv(), CPU_INTERRUPT_EXITTB);
+					return;
+            }
+#endif
             break;
         case PL192_SOFTINTCLEAR:
             s->softint &= ~value;
@@ -389,7 +430,7 @@ static void pl192_write(void *opaque, target_phys_addr_t offset,
             /* Ignore written value */
             return;
         default:
-            hw_error("pl192: bad write offset " TARGET_FMT_plx "\n", offset);
+            fprintf(stderr, "pl192: bad write offset " TARGET_FMT_plx "\n", offset);
             return;
     }
 

@@ -5,7 +5,7 @@ make
 
 How to run:
 
-./arm-softmmu/qemu-system-arm -M iphone2g -option-rom iBoot-1.0.2.m68ap.RELEASE -option-rom iphone1-bootrom.bin -pflash nordump.bin -serial stdio -skin ./skin/devices/iphone2g/skin.xml
+./arm-softmmu/qemu-system-arm -M ipad1g -option-rom iBoot.k48ap.RELEASE.unencrypted -global s5l8930_h2fmi0.file="0,ce0.bin;2,ce2.bin" -global s5l8930_h2fmi1.file="0,ce1.bin;2,ce3.bin" -pflash ipadnor.bin -gdb tcp::6666 -nographic -S -serial file:serial.txt -monitor stdio -smp 2
 
 How do i contribute:
 

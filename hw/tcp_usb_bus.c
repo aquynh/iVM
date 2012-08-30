@@ -179,7 +179,7 @@ static int do_token_setup(tcp_passthrough_state_t *s, USBPacket *p)
 
 static int do_token_in(tcp_passthrough_state_t *s, USBPacket *p)
 {
-	debug_printf("%s: %d.\n", __func__, p->devep);
+	debug_printf("%s.\n", __func__);
 
 	s->header.ep = p->devep | USB_DIR_IN;
 	s->header.length = s->dev.setup_len;
@@ -189,7 +189,7 @@ static int do_token_in(tcp_passthrough_state_t *s, USBPacket *p)
 	usb_defer_packet(p, passthrough_cancel, s);
 	if(tcp_usb_request(s->tcp, &s->header, (char*)p->data) < 0)
 	{
-		debug_printf("tcp_usb: IN %d fail'd.\n", p->devep);
+		debug_printf("tcp_usb: IN 0 fail'd.\n");
 		return USB_RET_STALL;
 	}
 
@@ -198,7 +198,7 @@ static int do_token_in(tcp_passthrough_state_t *s, USBPacket *p)
 
 static int do_token_out(tcp_passthrough_state_t *s, USBPacket *p)
 {
-	debug_printf("%s: %d.\n", __func__, p->devep);
+	debug_printf("%s.\n", __func__);
 
 	s->header.ep = p->devep & 0x7f;
 	s->header.length = p->len;
@@ -208,7 +208,7 @@ static int do_token_out(tcp_passthrough_state_t *s, USBPacket *p)
 	usb_defer_packet(p, passthrough_cancel, s);
 	if(tcp_usb_request(s->tcp, &s->header, (char*)p->data) < 0)
 	{
-		debug_printf("tcp_usb: OUT %d fail'd.\n", p->devep);
+		debug_printf("tcp_usb: OUT 0 fail'd.\n");
 		return USB_RET_STALL;
 	}
 

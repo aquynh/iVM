@@ -146,6 +146,7 @@ static uint32_t s5l8900_uart_mm_read(void *opaque, target_phys_addr_t offset)
     case 0x10:
         return s->utrstat;
     case 0x14:
+        qemu_irq_lower(s->irq);
         res = s->uerstat;
         s->uerstat = 0;
         return res;
@@ -255,7 +256,7 @@ static void s5l8900_uart_mm_write(void *opaque, target_phys_addr_t offset,
         hw_error("s5l8900.uart: bad write offset 0x" TARGET_FMT_plx "\n",
                  offset);
     }
-    s5l8900_uart_update(s);
+    //s5l8900_uart_update(s);
 }
 
 CPUReadMemoryFunc * const s5l8900_uart_readfn[] = {
@@ -343,6 +344,8 @@ DeviceState *s5l8900_uart_init(target_phys_addr_t base, int instance,
 {
     DeviceState *dev = qdev_create(NULL, "s5l8900.uart");
     char str[] = "s5l8900.uart.00";
+
+    //fprintf(stderr, "%s: irq %x base 0x%08x\n", __FUNCTION__, print_irq(irq), base);
 
     if (!chr) {
 		fprintf(stderr, "openning char device\n");

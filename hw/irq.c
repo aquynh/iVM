@@ -30,11 +30,17 @@ struct IRQState {
     int n;
 };
 
+void print_irq(qemu_irq irq)
+{
+	fprintf(stderr, "IRQ: %x\n", irq->n);
+}
+
 void qemu_set_irq(qemu_irq irq, int level)
 {
     if (!irq)
         return;
 
+	//fprintf(stderr, "%s: calling handler for irq %x level %d\n", __FUNCTION__, irq->n, level);
     irq->handler(irq->opaque, irq->n, level);
 }
 

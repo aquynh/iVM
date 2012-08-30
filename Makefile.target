@@ -356,8 +356,12 @@ obj-arm-y += syborg.o syborg_fb.o syborg_interrupt.o syborg_keyboard.o
 obj-arm-y += syborg_serial.o syborg_timer.o syborg_pointer.o syborg_rtc.o
 obj-arm-y += syborg_virtio.o
 obj-arm-y += vexpress.o
-obj-arm-y += s5l8900.o iphone2g.o pcf50633.o s5l8900_uart.o s5l8900_spi.o pl192.o
-obj-arm-y += s5l8900_i2c.o usb_synopsys.o
+#obj-arm-y += s5l8900.o iphone2g.o pcf50633.o s5l8900_uart.o s5l8900_spi.o pl192.o
+#disable 2g support
+obj-arm-y += s5l8900_i2c.o usb_synopsys.o pcf50633.o s5l8900_uart.o s5l8900_spi.o pl192.o
+obj-arm-y += s5l8930.o s5l8930_i2c.o s5l8930_i2cchg.o s5l8930_spi.o s5l8930_iop.o
+obj-arm-y += pflash_spi.o s5l8930_h2fmi.o
+obj-arm-y += ipad1g.o
 
 #ifdef CONFIG_SKINNING
 VPATH+=:$(SRC_PATH)/skin

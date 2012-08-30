@@ -905,6 +905,7 @@ static int bdrv_check_byte_request(BlockDriverState *bs, int64_t offset,
     if (offset < 0)
         return -EIO;
 
+	//fprintf(stderr, "%s: offset %llx len %llx size %x\n", __FUNCTION__, offset, len, size);
     if ((offset > len) || (len - offset < size))
         return -EIO;
 
