@@ -29,8 +29,7 @@
 #define RAM_SIZE 	   	0x08000000
 #define NOR_BASE_ADDR   0x24000000
 
-uint32_t g_debug = (0
-					//S5L8900_DEBUG_CLK
+uint32_t g_debug = ( 0 //S5L8900_DEBUG_CLK
                     //0xffffffff |
                     );
 uint32_t g_dlevel = 0;
@@ -244,16 +243,11 @@ static uint32_t lcd_read(void *opaque, target_phys_addr_t offset)
     return 0;
 }
 
-// Not implemented
 static void lcd_write(void *opaque, target_phys_addr_t offset, uint32_t value)
 {
-    //iphone2g_lcd_s *s = (iphone2g_lcd_s *)opaque;
-	//fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
-	
 	if(offset == 0x78) // Window 2 framebuffer. Doesn't detect active window yet!
 	{
 		// Framebuffer Address
-		//fprintf(stderr, "%s: Found framebuffer at 0x%08x.\n", __func__, value);
 		frame_base = value;
 	}
 }
@@ -286,12 +280,12 @@ static iphone2g_lcd_s * iphone2g_lcd_init(target_phys_addr_t base)
 
 static uint32_t aes_read(void *opaque, target_phys_addr_t offset)
 {
-	struct iphone2g_aes_s *aesop = (struct iphone2g_aes_s *)opaque;
+	struct aes_s *aesop = (struct aes_s *)opaque;
 
 	//fprintf(stderr, "%s: offset 0x%08x\n", __FUNCTION__, offset);
 
 	switch(offset) {
-		case IPHONE2G_AES_STATUS:
+		case AES_STATUS:
 			return aesop->status;
 	  default:
             //fprintf(stderr, "%s: UNMAPPED AES_ADDR @ offset 0x%08x\n", __FUNCTION__, offset);
@@ -301,93 +295,80 @@ static uint32_t aes_read(void *opaque, target_phys_addr_t offset)
     return 0;
 }
 
-typedef struct cryptdata {
-	uint8_t crypt[0x80];
-} cryptdata;
-
-cryptdata cdata[] =
-{
-	 {{0x93, 0x1E, 0x46, 0xB9, 0x79, 0x17, 0xd9, 0xFE, 0xA, 0x0, 0x1D, 0xAD, 0x10, 0x82, 0xA8, 0x15, 0x96, 0x4F, 0xDC, 0x24, 0x11, 0xAB, 0xCD, 0xA6, 0xDE,
-0xDD, 0xE9, 0xDA, 0xCC, 0xB4, 0xE6, 0xD9, 0x5, 0x0}},
-    {{0x6B, 0x84, 0x3, 0x34, 0x9E, 0x4, 0xCB, 0xDD, 0xFF, 0x69, 0x73, 0x40, 0x53, 0x60, 0xC, 0xF7, 0xC7, 0xF, 0x2C, 0x2, 0xD, 0xA3, 0x2A, 0xFD, 0xEA, 0x8E, 0xC8, 0xEC, 0x2D, 0xa, 0xF5, 0x5E, 0x5, 0x0}},
-	{{0xBD, 0x9F, 0x26, 0xC7, 0xFD, 0xF3, 0xC3, 0xDF, 0xA2, 0xE7, 0x88, 0xDB, 0x48, 0x3B, 0x7C, 0x70, 0x57, 0xFF, 0xF2, 0x7F, 0x26, 0x65, 0x80, 0x4D, 0xB4, 0x2B, 0x48, 0x5F, 0x4, 0xDF, 0x31, 0xf, 0x5, 0x0}},
-	{{0x8A, 0x37, 0x45, 0x45, 0xD7, 0x94, 0xCC, 0xC5, 0xD2, 0xE5, 0x5F, 0x51, 0x85, 0x12, 0xE3, 0x57, 0xA5, 0x6F, 0xFC, 0xF2, 0xBD, 0xE3, 0xF5, 0x39, 0x2, 0x14, 0x8F, 0x69, 0x49, 0x37, 0xA9, 0x1F, 0x5, 0x0}},
-	{{0xF8, 0xCB, 0xEE, 0x5F, 0xB5, 0xB1, 0x2C, 0x25, 0xf, 0x5A, 0x7F, 0x45, 0xE9, 0xB8, 0x55, 0xAE, 0xFC, 0x6C, 0x69, 0x3E, 0x6E, 0x65, 0x4D, 0x69, 0x66, 0x33, 0x17, 0x67, 0xFC, 0x9E, 0x2A, 0x8, 0x5, 0x0}},
-	{{0xE7, 0x25, 0x5, 0x46, 0xAC, 0x12, 0xEA, 0x24, 0x7F, 0x1D, 0xC1, 0x98, 0x72, 0x48, 0x69, 0x8F, 0xBC, 0x3A, 0x83, 0xc, 0xAB, 0xA2, 0xC8, 0xD6, 0x8E, 0xC2, 0x5E, 0xD3, 0xFD, 0x6, 0x2A, 0xE6, 0x5, 0x0}},
-	{{0xC5, 0xDA, 0x96, 0xBD, 0x24, 0xBC, 0x53, 0x77, 0x61, 0x70, 0x4E, 0x84, 0x39, 0xBF, 0x18, 0x3C, 0x29, 0x2C, 0x1F, 0xD6, 0xE1, 0x66, 0x9C, 0xAD, 0x84, 0xDF, 0x4A, 0x12, 0xF2, 0x19, 0x12, 0x72, 0x5, 0x0}},
-	{{0x18, 0x60, 0x8A, 0x5B, 0x1, 0x90, 0x3E, 0x77, 0xCB, 0xAE, 0xA7, 0xA8, 0xEF, 0xA6, 0xF6, 0xF0, 0xF7, 0x44, 0x6C, 0x5A, 0xd, 0x3D, 0xC6, 0xEE, 0x20, 0xB5, 0x7A, 0x11, 0xFD, 0x6F, 0x2C, 0x6F, 0x5, 0x0}},
-	{{0x2F, 0x3C, 0x85, 0x5, 0x84, 0x40, 0xED, 0xA4, 0xF6, 0x6A, 0x1A, 0x78, 0x4F, 0x3F, 0x5D, 0x26, 0xD4, 0xEE, 0x80, 0x5C, 0x67, 0xF5, 0x92, 0x90, 0x37, 0x59, 0x3A, 0x1E, 0x19, 0x89, 0xB6, 0x38, 0x79, 0x58, 0x50, 0x5C, 0xEA, 0x8D, 0xED, 0x16, 0xB4, 0xA2, 0xA, 0xA7, 0x59, 0xC8, 0x29, 0x23, 0x87, 0x57, 0xC8, 0xD1, 0xD9, 0xC0, 0x98, 0x9D, 0xF5, 0xCF, 0x71, 0x9F, 0x20, 0xD8, 0x61, 0x3D, 0x11}},
-    {{0x2F, 0x3C, 0x85, 0x5, 0x84, 0x40, 0xED, 0xA4, 0xF6, 0x6A, 0x1A, 0x78, 0x4F, 0x3F, 0x5D, 0x26, 0xD4, 0xEE, 0x80, 0x5C, 0x67, 0xF5, 0x92, 0x90, 0x37, 0x59, 0x3A, 0x1E, 0x19, 0x89, 0xB6, 0x38, 0x79, 0x58, 0x50, 0x5C, 0xEA, 0x8D, 0xED, 0x16, 0xB4, 0xA2, 0xA, 0xA7, 0x59, 0xC8, 0x29, 0x23, 0x87, 0x57, 0xC8, 0xD1, 0xD9, 0xC0, 0x98, 0x9D, 0xF5, 0xCF, 0x71, 0x9F, 0x20, 0xD8, 0x61, 0x3D, 0x11}},
-    {{0x2F, 0x3C, 0x85, 0x5, 0x84, 0x40, 0xED, 0xA4, 0xF6, 0x6A, 0x1A, 0x78, 0x4F, 0x3F, 0x5D, 0x26, 0xD4, 0xEE, 0x80, 0x5C, 0x67, 0xF5, 0x92, 0x90, 0x37, 0x59, 0x3A, 0x1E, 0x19, 0x89, 0xB6, 0x38, 0x79, 0x58, 0x50, 0x5C, 0xEA, 0x8D, 0xED, 0x16, 0xB4, 0xA2, 0xA, 0xA7, 0x59, 0xC8, 0x29, 0x23, 0x87, 0x57, 0xC8, 0xD1, 0xD9, 0xC0, 0x98, 0x9D, 0xF5, 0xCF, 0x71, 0x9F, 0x20, 0xD8, 0x61, 0x3D, 0x11}},
-    {{0x2F, 0x3C, 0x85, 0x5, 0x84, 0x40, 0xED, 0xA4, 0xF6, 0x6A, 0x1A, 0x78, 0x4F, 0x3F, 0x5D, 0x26, 0xD4, 0xEE, 0x80, 0x5C, 0x67, 0xF5, 0x92, 0x90, 0x37, 0x59, 0x3A, 0x1E, 0x19, 0x89, 0xB6, 0x38, 0x79, 0x58, 0x50, 0x5C, 0xEA, 0x8D, 0xED, 0x16, 0xB4, 0xA2, 0xA, 0xA7, 0x59, 0xC8, 0x29, 0x23, 0x87, 0x57, 0xC8, 0xD1, 0xD9, 0xC0, 0x98, 0x9D, 0xF5, 0xCF, 0x71, 0x9F, 0x20, 0xD8, 0x61, 0x3D, 0x11}}
-
-};
-static int ccount = 0;
-
 static void aes_write(void *opaque, target_phys_addr_t offset,
                        uint32_t value)
 {
-	 struct iphone2g_aes_s *aesop = (struct iphone2g_aes_s *)opaque;
-	 uint8_t inbuf[0x1000];
-	 uint8_t *buf;
-	 //uint32_t ctr;
+	struct aes_s *aesop = (struct aes_s *)opaque;
+    static uint8_t keylenop = 0;
 
-	 //fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
+	uint8_t inbuf[0x1000];
+	uint8_t *buf;
+
+	//fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
 
 	switch(offset) {
-			case IPHONE2G_AES_GO:
-				//fprintf(stderr, "%s: Received AES_GO lets do it\n", __FUNCTION__);
-				memset(aesop->ivec, 0, 16);
-
+			case AES_GO:
 				memset(inbuf, 0, sizeof(inbuf));
-                //fprintf(stderr, "%s: AES_DECRYPT INADDR 0x%08x INSIZE 0x%08x OUTADDR 0x%08x\n", __FUNCTION__, aesop->inaddr,  aesop->insize, aesop->outaddr);
-
 				cpu_physical_memory_read((aesop->inaddr - 0x80000000), (uint8_t *)inbuf, aesop->insize);
-				/*
-				for( ctr = 0; ctr < aesop->insize; ctr++ )
-				{
-					fprintf(stderr, "%02x ", inbuf[ ctr ] );
+
+				switch(aesop->keytype) {
+						case AESGID:	
+							fprintf(stderr, "%s: No support for GID key\n", __func__);
+							return;			
+						case AESUID:
+						    AES_set_decrypt_key(key_uid, sizeof(key_uid) * 8, &aesop->decryptKey);
+							break;
+						case AESCustom:
+							AES_set_decrypt_key((uint8_t *)aesop->custkey, 0x20 * 8, &aesop->decryptKey);
+							break;
 				}
-				fprintf(stderr, "\n" ); 
-				*/
-				buf = (uint8_t *) malloc(aesop->insize);
-				memset(buf, 0, aesop->insize);
-				if(aesop->insize >= 0x20)
-				{
-					memcpy(buf, cdata[ccount].crypt, aesop->insize);
-					ccount++;
-				} else {
-					//AES_cbc_encrypt(inbuf, buf, aesop->insize, &aesop->decryptKey, aesop->ivec, AES_DECRYPT);
-					/*
-					fprintf(stderr, "decrypting: ");
-                	for( ctr = 0; ctr < aesop->insize; ctr++ )
-                	{
-                    	fprintf(stderr, "%02x ", buf[ ctr ] );
-                	}
-					*/
-					;
-				}
+
+				buf = (uint8_t *) qemu_mallocz(aesop->insize);
+
+				AES_cbc_encrypt(inbuf, buf, aesop->insize, &aesop->decryptKey, (uint8_t *)aesop->ivec, aesop->operation);
+
 				cpu_physical_memory_write((aesop->outaddr - 0x80000000), buf, aesop->insize);
-				free(buf);
+				memset(aesop->custkey, 0, 0x20);
+				memset(aesop->ivec, 0, 0x10);
+				qemu_free(buf);
+				keylenop = 0;
 				aesop->outsize = aesop->insize;
 				aesop->status = 0xf;
 				break;
-			case IPHONE2G_AES_INADDR:
+			case AES_KEYLEN:
+				if(keylenop == 1) {
+					aesop->operation = value;
+				}
+				keylenop++;
+				aesop->keylen = value;
+				break;
+			case AES_INADDR:
 				aesop->inaddr = value;
 				break;
-			case IPHONE2G_AES_INSIZE:
+			case AES_INSIZE:
 				aesop->insize = value;
 				break;
-			case IPHONE2G_AES_OUTSIZE:
+			case AES_OUTSIZE:
                 aesop->outsize = value;
                 break;
-			case IPHONE2G_AES_OUTADDR:
+			case AES_OUTADDR:
                 aesop->outaddr = value;
                 break;
-			case IPHONE2G_AES_KEY ... ((IPHONE2G_AES_KEY + IPHONE2G_AES_KEYSIZE) - 1):
+			case AES_TYPE:
+				aesop->keytype = value;
 				break;
-			case IPHONE2G_AES_IV ... ((IPHONE2G_AES_IV + IPHONE2G_AES_IVSIZE) -1 ):
-				break;
+			case AES_KEY_REG ... ((AES_KEY_REG + AES_KEYSIZE) - 1):
+				{
+                    uint8_t idx = (offset - AES_KEY_REG) / 4;
+                    aesop->custkey[idx] |= value;
+					break;
+				}
+			case AES_IV_REG ... ((AES_IV_REG + AES_IVSIZE) -1 ):
+				{
+					uint8_t idx = (offset - AES_IV_REG) / 4;
+					aesop->ivec[idx] |= value;
+					break;
+				}
 		default:
 			//fprintf(stderr, "%s: UNMAPPED AES_ADDR @ offset 0x%08x - 0x%08x\n", __FUNCTION__, offset, value);
 			break;
@@ -407,16 +388,123 @@ static CPUWriteMemoryFunc *aes_writefn[] = {
     aes_write,
 };
 
-static void iphone2g_aes_init(target_phys_addr_t base)
+static void aes_init(target_phys_addr_t base)
 {
-	struct iphone2g_aes_s *aesop = (struct iphone2g_aes_s *) qemu_mallocz(sizeof(iphone2g_aes_s));
+	struct aes_s *aesop = (struct aes_s *) qemu_mallocz(sizeof(aes_s));
     int io;
 
     io = cpu_register_io_memory(aes_readfn, aes_writefn, aesop, DEVICE_LITTLE_ENDIAN);
     cpu_register_physical_memory(base, 0xFF, io);
+}
 
-	//AES_set_decrypt_key(key_0x837, sizeof(key_0x837) * 8, &aesop->decryptKey); 
+typedef struct sha1_status {
+    uint32_t config;
+    uint32_t reset;
+    uint32_t hresult;
+    uint32_t insize;
+    uint32_t unkstat;
+    uint8_t hashout[0x14];
+} sha1_status_s;
 
+static void sha1_reset(void *opaque)
+{
+    sha1_status_s *s = (sha1_status_s *)opaque;
+	memset(s, 0, sizeof(sha1_status_s));
+}
+
+static uint32_t sha1_read(void *opaque, target_phys_addr_t offset)
+{
+	sha1_status_s *s = (sha1_status_s *)opaque;
+
+    //fprintf(stderr, "%s: offset 0x%08x\n", __FUNCTION__, offset);
+
+	switch(offset) {
+		case SHA_CONFIG:
+			return s->config;
+		case SHA_RESET:
+			return 0;
+		case SHA_HRESULT:
+			return s->hresult;
+		case SHA_INSIZE:
+			return s->insize;
+		/* Hash result ouput */
+		case 0x20 ... 0x34:
+			//fprintf(stderr, "Hash out %08x\n",  *(uint32_t *)&s->hashout[offset - 0x20]);
+			return *(uint32_t *)&s->hashout[offset - 0x20];
+	}
+
+    return 0;
+}
+
+static void sha1_write(void *opaque, target_phys_addr_t offset,
+                       uint32_t value)
+{
+    sha1_status_s *s = (sha1_status_s *)opaque;
+
+    //fprintf(stderr, "%s: offset 0x%08x value 0x%08x\n", __FUNCTION__, offset, value);
+
+	switch(offset) {
+		case SHA_CONFIG:
+			if((value & 0x2) && (s->config & 0x8))
+			{	
+				uint8_t *hptr;
+
+				if(!s->hresult || !s->insize)
+					return;
+				
+				/* Why do they give us incorrect size? */
+				s->insize += 0x20;
+
+                hptr = (uint8_t *) qemu_mallocz(s->insize);
+                cpu_physical_memory_read(s->hresult, (uint8_t *)hptr, s->insize);
+
+    			SHA_CTX context;
+    			SHA1_Init(&context);
+    			SHA1_Update(&context, (uint8_t*) hptr, s->insize);
+    			SHA1_Final(s->hashout, &context);
+				
+				qemu_free(hptr);
+			} else {
+				s->config = value;
+			}
+			break;
+		case SHA_RESET:
+			if(value & 1) 
+				sha1_reset(s);
+			break;
+		case SHA_HRESULT:
+			s->hresult = value;
+			break;
+		case SHA_INSIZE:
+			s->insize = value;
+			break;
+		case SHA_UNKSTAT:
+			s->unkstat = value;
+			break;
+	}
+
+
+}
+
+static CPUReadMemoryFunc * const sha1_readfn[] = {
+    sha1_read,
+    sha1_read,
+    sha1_read,
+};
+
+static CPUWriteMemoryFunc * const sha1_writefn[] = {
+    sha1_write,
+    sha1_write,
+    sha1_write,
+};
+
+static void sha1_init(target_phys_addr_t base)
+{
+    sha1_status_s *s = (sha1_status_s *) qemu_mallocz(sizeof(sha1_status_s));
+    int iomemtype = cpu_register_io_memory(sha1_readfn,
+                                           sha1_writefn,
+                                           s, DEVICE_LITTLE_ENDIAN);
+    cpu_register_physical_memory(base, 0xFF, iomemtype);
 }
 
 typedef struct iphone2gKeyState_s {
@@ -500,7 +588,9 @@ static void iphone2g_init(ram_addr_t ram_size,
       exit(1);
   	}
 
-    cpu_register_physical_memory(iboot_base, (ram_addr_t)iboot_size,(phys_flash = qemu_ram_alloc(NULL, "iphone2g.iboot", iboot_size)));
+    cpu_register_physical_memory(0x22000000, 0x500000, qemu_ram_alloc(NULL, "iphone2g.sram", 0x500000));
+
+    cpu_register_physical_memory(iboot_base, (ram_addr_t)iboot_size, qemu_ram_alloc(NULL, "iphone2g.iboot", iboot_size) | IO_MEM_RAM);
     load_image_targphys(option_rom[0].name, iboot_base, iboot_size);
 
 
@@ -508,7 +598,7 @@ static void iphone2g_init(ram_addr_t ram_size,
 	/* Map in default ram space */
     cpu_register_physical_memory(RAM_BASE_ADDR, RAM_SIZE, ramoff | IO_MEM_RAM);
 	/* Also map higher ram space to default */
-    cpu_register_physical_memory(RAM_HIGH_ADDR, RAM_SIZE, ramoff | IO_MEM_RAM);
+    //cpu_register_physical_memory(RAM_HIGH_ADDR, RAM_SIZE, ramoff | IO_MEM_RAM);
 	/* Also also map to 0x0 as that's what OIB uses */
     cpu_register_physical_memory(0x0, RAM_SIZE, ramoff | IO_MEM_RAM);
 
@@ -531,7 +621,10 @@ static void iphone2g_init(ram_addr_t ram_size,
 	iphone2g_lcd_init(LCD_BASE_ADDR);
 
 	/* Init AES hardware */
-	iphone2g_aes_init(AES_BASE_ADDR);
+	aes_init(AES_BASE_ADDR);
+
+	/* Init SHA1 hardware */
+	sha1_init(SHA1_BASE_ADDR);
 	
     /* Button emulation */
     iphone2g_register_keyboard();
@@ -540,8 +633,8 @@ static void iphone2g_init(ram_addr_t ram_size,
 }
 
 static QEMUMachine iphone2g_machine = {
-    .name = "iphone2g",
-    .desc = "iPhone 2G",
+    .name = "iPhone1",
+    .desc = "iPhone 1",
     .init = iphone2g_init,
 };
 

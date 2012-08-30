@@ -145,6 +145,8 @@ int main(int argc, char **argv)
 #include "qemu-config.h"
 #include "qemu-objects.h"
 #include "qemu-options.h"
+#include "iemu.h"
+
 #ifdef CONFIG_VIRTFS
 #include "fsdev/qemu-fsdev.h"
 #endif
@@ -2200,12 +2202,26 @@ int main(int argc, char **argv, char **envp)
                 exit(1);
 #endif
                 break;
+			case QEMU_OPTION_iosfirmware:
+                if (*optarg == '?') {
+					iemu_fw_list(machine->name);
+                    exit(0);
+                } else {
+					if(iemu_fw_init(optarg, machine->name) < 0) 
+					{
+						fprintf(stderr, "Invalid firmware version %s for device %s\n", optarg, machine->name);
+						exit(0);
+					}
+					/* Load skin */
+					skin_file = iemu_get_skin();
+                }
+				break;
             case QEMU_OPTION_portrait:
                 graphic_rotate = 1;
                 break;
-						case QEMU_OPTION_landscape:
-								graphic_rotate = 0;
-								break;
+			case QEMU_OPTION_landscape:
+				graphic_rotate = 0;
+				break;
             case QEMU_OPTION_kernel:
                 kernel_filename = optarg;
                 break;

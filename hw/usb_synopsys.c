@@ -325,7 +325,7 @@ static void synopsys_usb_update_irq(synopsys_usb_state *_state)
 	
 	if((_state->pcgcctl & 3) == 0 && _state->gintmsk & _state->gintsts)
 	{
-		printf("USB: IRQ triggered 0x%08x & 0x%08x.\n", _state->gintsts, _state->gintmsk);
+		//printf("USB: IRQ triggered 0x%08x & 0x%08x.\n", _state->gintsts, _state->gintmsk);
 		qemu_irq_raise(_state->irq);
 	}
 	else
@@ -354,7 +354,7 @@ static void synopsys_usb_update_in_ep(synopsys_usb_state *_state, uint8_t _ep)
 	synopsys_usb_update_ep(_state, eps);
 
 	if(eps->control & USB_EPCON_ENABLE)
-		printf("USB: IN transfer queued on %d.\n", _ep);
+		;//printf("USB: IN transfer queued on %d.\n", _ep);
 }
 
 static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, uint8_t _ep)
@@ -363,7 +363,7 @@ static void synopsys_usb_update_out_ep(synopsys_usb_state *_state, uint8_t _ep)
 	synopsys_usb_update_ep(_state, eps);
 
 	if(eps->control & USB_EPCON_ENABLE)
-		printf("USB: OUT transfer queued on %d.\n", _ep);
+		;//printf("USB: OUT transfer queued on %d.\n", _ep);
 }
 
 static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_usb_header_t *_hdr, char *_buffer)
@@ -393,7 +393,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 		if(eps->control & USB_EPCON_STALL)
 		{
 			eps->control &=~ USB_EPCON_STALL; // Should this be EP0 only
-			printf("USB: Stall.\n");
+			//printf("USB: Stall.\n");
 			ret = USB_RET_STALL;
 		}
 		else if(eps->control & USB_EPCON_ENABLE)
@@ -417,7 +417,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 			if(txfs + txfz > sizeof(state->fifos))
 				hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
 
-			printf("USB: Starting IN transfer on EP %d (%d)...\n", ep, amtDone);
+			//printf("USB: Starting IN transfer on EP %d (%d)...\n", ep, amtDone);
 
 			if(amtDone > 0)
 			{
@@ -430,7 +430,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 				memcpy(_buffer, (char*)&state->fifos[txfs], amtDone);
 			}
 
-			printf("USB: IN transfer complete!\n");
+			//printf("USB: IN transfer complete!\n");
 
 			eps->tx_size = (eps->tx_size &~ DEPTSIZ_XFERSIZ_MASK)
 							| ((sz-amtDone) & DEPTSIZ_XFERSIZ_MASK);
@@ -448,7 +448,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 		if(eps->control & USB_EPCON_STALL)
 		{
 			eps->control &=~ USB_EPCON_STALL; // Should this be EP0 only
-			printf("USB: Stall.\n");
+			//printf("USB: Stall.\n");
 			ret = USB_RET_STALL;
 		}
 		else if(eps->control & USB_EPCON_ENABLE)
@@ -468,7 +468,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 			if(rxfz > sizeof(state->fifos))
 				hw_error("usb_synopsys: USB transfer would overflow FIFO buffer!\n");
 
-			printf("USB: Starting OUT transfer on EP %d (%d)...\n", ep, amtDone);
+			//printf("USB: Starting OUT transfer on EP %d (%d)...\n", ep, amtDone);
 
 			if(amtDone > 0)
 			{
@@ -486,6 +486,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 
 			if(_hdr->flags & tcp_usb_setup)
 			{
+			/*
 				printf("USB: Setup %02x %02x %02x %02x %02x %02x %02x %02x\n",
 						state->fifos[0],
 						state->fifos[1],
@@ -495,7 +496,7 @@ static int synopsys_usb_tcp_callback(tcp_usb_state_t *_state, void *_arg, tcp_us
 						state->fifos[5],
 						state->fifos[6],
 						state->fifos[7]);
-
+			*/
 				eps->interrupt_status |= USB_EPINT_SetUp;
 			}
 			else

@@ -1,0 +1,7 @@
+<device>
+	<name>iPhone1</name>
+	<hwid>m68ap</hwid>
+	<skin>skin.xml</skin>
+	<boot>iboot</boot>
+	<loadaddr>0x18000000</loadaddr>
+</device>
