@@ -3,6 +3,8 @@
  *
  * Copyright (c) 2005 Vassili Karpov (malc)
  *
+ * Copyright (C) 2013 NamoDev (Namo)
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -74,7 +76,8 @@ static struct {
     int period_size_out_overridden;
     int verbose;
 } conf = {
-    .buffer_size_out = 4096,
+    /* Default Buffer Sizes : In 4096, Out 1024 */
+    .buffer_size_out = 4096, /* We're checking if higher buffer rates are possible */
     .period_size_out = 1024,
     .pcm_name_out = "default",
     .pcm_name_in = "default",
@@ -106,7 +109,7 @@ static void GCC_FMT_ATTR (2, 3) alsa_logerr (int err, const char *fmt, ...)
     AUD_vlog (AUDIO_CAP, fmt, ap);
     va_end (ap);
 
-    AUD_log (AUDIO_CAP, "Reason: %s\n", snd_strerror (err));
+    AUD_log (AUDIO_CAP, "ERROR Reason: %s\n", snd_strerror (err));
 }
 
 static void GCC_FMT_ATTR (3, 4) alsa_logerr2 (
