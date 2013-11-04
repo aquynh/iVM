@@ -207,7 +207,7 @@ static void kvm_s390_interrupt_internal(CPUState *env, int type, uint32_t parm,
     }
 
     if (r < 0) {
-        fprintf(stderr, "KVM failed to inject interrupt\n");
+        fprintf(stderr, "Error K01 - KVM failed to inject interrupt\n");
         exit(1);
     }
 }
@@ -250,7 +250,7 @@ static int sclp_service_call(CPUState *env, struct kvm_run *run, uint16_t ipbh0)
     dprintf("sclp(0x%x, 0x%lx)\n", sccb, code);
 
     if (sccb & ~0x7ffffff8ul) {
-        fprintf(stderr, "KVM: invalid sccb address 0x%x\n", sccb);
+        fprintf(stderr, "Error K02 - KVM: invalid sccb address 0x%x\n", sccb);
         r = -1;
         goto out;
     }
@@ -267,7 +267,7 @@ static int sclp_service_call(CPUState *env, struct kvm_run *run, uint16_t ipbh0)
                                         sccb & ~3, 0, 1);
             break;
         default:
-            dprintf("KVM: invalid sclp call 0x%x / 0x%lx\n", sccb, code);
+            dprintf("Error K03 - KVM: invalid sclp call 0x%x / 0x%lx\n", sccb, code);
             r = -1;
             break;
     }
@@ -290,7 +290,7 @@ static int handle_priv(CPUState *env, struct kvm_run *run, uint8_t ipa1)
             r = sclp_service_call(env, run, ipbh0);
             break;
         default:
-            dprintf("KVM: unknown PRIV: 0x%x\n", ipa1);
+            dprintf("Error K04 - KVM: unknown PRIV: 0x%x\n", ipa1);
             r = -1;
             break;
     }
@@ -320,7 +320,7 @@ static int handle_diag(CPUState *env, struct kvm_run *run, int ipb_code)
             sleep(10);
             break;
         default:
-            dprintf("KVM: unknown DIAG: 0x%x\n", ipb_code);
+            dprintf("Error K05 - KVM: unknown DIAG: 0x%x\n", ipb_code);
             r = -1;
             break;
     }
