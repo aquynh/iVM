@@ -1,5 +1,5 @@
 iVM
-WINE-Like subsystem + Open Source VM Stack
+WINE-Like subsystem + Open Source VM Stack + Android AOSP
 
 how to compile:
 
