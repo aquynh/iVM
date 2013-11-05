@@ -28,6 +28,10 @@ const int BUFFER_SIZE = 1024;
 
 /* Buffer Size is Doubled from Default. Default = 512 */
 
+/* Debug Switches */
+const int DEBUG_MODE = 0;
+const int DBG_OVERRIDE = 0;
+
 typedef struct SkinParser {
     SkinScreen* skin;
     SkinLayout* layout;
