@@ -23,6 +23,10 @@
 #include "skin_button.h"
 #include "skin_switchstate.h"
 
+/* Debug Switches */
+
+int debug;
+
 typedef struct SkinButtonStateCallback {
     switchstate_callback *callback;
     void *opaque;
