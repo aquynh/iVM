@@ -1,3 +1,6 @@
+iVM
+WINE-Like subsystem + Open Source VM Stack
+
 how to compile:
 
 ./configure --target-list=arm-softmmu --enable-sdl --enable-skinning
