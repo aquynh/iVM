@@ -24,7 +24,9 @@
 #include "skin_config.h"
 #include "skin_image.h"
 
-const int BUFFER_SIZE = 512;
+const int BUFFER_SIZE = 1024;
+
+/* Buffer Size is Doubled from Default. Default = 512 */
 
 typedef struct SkinParser {
     SkinScreen* skin;
